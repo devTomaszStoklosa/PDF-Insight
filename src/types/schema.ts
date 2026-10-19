@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { countSentences } from '../lib/countSentences.ts';
+import { CURRENCY_CODES } from './currencyCodes.ts';
 
 const SUMMARY_SENTENCES = { min: 3, max: 5 } as const;
 const KEY_POINTS = { min: 3, max: 7 } as const;
@@ -30,7 +31,12 @@ export const entitiesSchema = z.strictObject({
 export const amountSchema = z.strictObject({
   // Negative values are allowed, e.g. on correction invoices.
   value: z.number(),
-  currency: z.string().regex(/^[A-Z]{3}$/, 'Expected an ISO 4217 currency code, e.g. "PLN"'),
+  // The format check stays in the JSON schema for the model; the list check runs only here,
+  // so a made-up code such as "ABC" triggers the self-correction retry.
+  currency: z
+    .string()
+    .regex(/^[A-Z]{3}$/, 'Expected an ISO 4217 currency code, e.g. "PLN"')
+    .refine((code) => CURRENCY_CODES.has(code), 'Unknown ISO 4217 currency code'),
   context: nonEmptyText,
 });
 
