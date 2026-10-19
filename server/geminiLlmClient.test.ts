@@ -9,6 +9,7 @@ import { ANALYZE_TIMEOUT_MS } from '../src/api/analyzeClient.ts';
 import {
   ANALYSIS_BUDGET_MS,
   GeminiLlmClient,
+  MIN_RETRY_TIME_MS,
   REQUEST_TIMEOUT_MS,
   toGeminiSchema,
   toLlmError,
@@ -276,6 +277,134 @@ describe('GeminiLlmClient', () => {
       kind: 'quota_exceeded',
       retryAfterSeconds: 30,
     });
+  });
+});
+
+describe('GeminiLlmClient retry after a transient error', () => {
+  const completed = (text: string): GoogleGenAIInteraction =>
+    interaction('completed', [modelOutput(text)], text);
+
+  /** A client on a fake clock: waiting advances the clock instead of taking real time. */
+  function clientOnClock(
+    responses: readonly (GoogleGenAIInteraction | Error)[],
+    {
+      deadline = Number.POSITIVE_INFINITY,
+      random = (): number => 0.5,
+    }: { deadline?: number; random?: () => number } = {},
+  ) {
+    const fake = fakeInteractions(responses);
+    const waits: number[] = [];
+    let now = 0;
+    const client = new GeminiLlmClient(fake.api, 'gemini-test', {
+      deadline,
+      now: () => now,
+      sleep: (ms) => {
+        waits.push(ms);
+        now += ms;
+        return Promise.resolve();
+      },
+      random,
+    });
+    return { fake, waits, session: client.startSession(SESSION_OPTIONS) };
+  }
+
+  it.each([503, 500])('retries once after a %i and returns the reply', async (status) => {
+    const { fake, waits, session } = clientOnClock([new FakeApiError(status), completed('{}')]);
+
+    await expect(session.send('Analyze.')).resolves.toEqual({ kind: 'text', text: '{}' });
+    expect(fake.calls).toHaveLength(2);
+    expect(fake.calls[1]).toEqual(fake.calls[0]);
+    expect(waits).toHaveLength(1);
+  });
+
+  it.each([
+    [0, 1_000],
+    [0.5, 1_500],
+    [0.999, 1_999],
+  ])('waits 1 s plus jitter before the retry (random %f)', async (random, expectedWait) => {
+    const { waits, session } = clientOnClock([new FakeApiError(503), completed('{}')], {
+      random: () => random,
+    });
+
+    await session.send('Analyze.');
+
+    expect(waits).toEqual([expectedWait]);
+  });
+
+  it('fails with the error of the retry when it fails too, after two requests', async () => {
+    const { fake, session } = clientOnClock([new FakeApiError(503), new FakeApiError(500)]);
+
+    await expect(session.send('Analyze.')).rejects.toMatchObject({
+      kind: 'unavailable',
+      upstreamStatus: 500,
+    });
+    expect(fake.calls).toHaveLength(2);
+  });
+
+  it('reports the error at once, without waiting, when too little time is left', async () => {
+    // With the 1.5 s wait, 500 ms less than MIN_RETRY_TIME_MS would be left.
+    const { fake, waits, session } = clientOnClock([new FakeApiError(503), completed('{}')], {
+      deadline: MIN_RETRY_TIME_MS + 1_000,
+    });
+
+    await expect(session.send('Analyze.')).rejects.toMatchObject({
+      kind: 'unavailable',
+      upstreamStatus: 503,
+    });
+    expect(fake.calls).toHaveLength(1);
+    expect(waits).toEqual([]);
+  });
+
+  it('retries when exactly MIN_RETRY_TIME_MS is left after the wait', async () => {
+    const { fake, session } = clientOnClock([new FakeApiError(503), completed('{}')], {
+      deadline: MIN_RETRY_TIME_MS + 1_500,
+    });
+
+    await session.send('Analyze.');
+
+    expect(fake.calls).toHaveLength(2);
+  });
+
+  it('cuts the timeout of the retry to the time left after the wait', async () => {
+    const { fake, session } = clientOnClock([new FakeApiError(503), completed('{}')], {
+      deadline: 20_000,
+    });
+
+    await session.send('Analyze.');
+
+    expect(fake.requestOptions.map((options) => options?.timeout_ms)).toEqual([20_000, 18_500]);
+  });
+
+  it.each<[string, GoogleGenAIInteraction | Error]>([
+    ['a 429', new FakeApiError(429)],
+    ['a 400', new FakeApiError(400)],
+    ['a 404', new FakeApiError(404)],
+    ['a 504', new FakeApiError(504)],
+    ['a timeout', new FakeTimeoutError()],
+    ['a failed interaction', interaction('failed', [])],
+  ])('does not retry after %s', async (_case, response) => {
+    const { fake, waits, session } = clientOnClock([response, completed('{}')]);
+
+    await expect(session.send('Analyze.')).rejects.toBeInstanceOf(LlmError);
+    expect(fake.calls).toHaveLength(1);
+    expect(waits).toEqual([]);
+  });
+
+  it('keeps one copy of the message in the history after a retry', async () => {
+    const { fake, session } = clientOnClock([
+      new FakeApiError(503),
+      completed('bad'),
+      completed('{}'),
+    ]);
+
+    await session.send('Analyze.');
+    await session.send('Fix it.');
+
+    expect(fake.calls[2]?.input).toEqual([
+      { type: 'user_input', content: [{ type: 'text', text: 'Analyze.' }] },
+      modelOutput('bad'),
+      { type: 'user_input', content: [{ type: 'text', text: 'Fix it.' }] },
+    ]);
   });
 });
 
