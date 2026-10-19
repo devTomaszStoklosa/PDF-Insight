@@ -204,7 +204,7 @@ describe('toLlmError', () => {
     ['a 401', new FakeApiError(401), 'misconfigured', 401],
     ['a 403', new FakeApiError(403), 'misconfigured', 403],
     ['a 404', new FakeApiError(404), 'misconfigured', 404],
-    ['a 400', new FakeApiError(400), 'unavailable', 400],
+    ['a 400', new FakeApiError(400), 'misconfigured', 400],
     ['a 503', new FakeApiError(503), 'unavailable', 503],
     ['a timeout without a status', new Error('timeout'), 'unavailable', undefined],
     ['a non-error value', 'boom', 'unavailable', undefined],
