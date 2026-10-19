@@ -57,13 +57,22 @@ const RETRY_DELAY_MS = { base: 1_000, jitter: 1_000 } as const;
  */
 export const MIN_RETRY_TIME_MS = 15_000;
 
-function isTransient(error: unknown): error is LlmError {
-  return (
-    error instanceof LlmError &&
-    error.upstreamStatus !== undefined &&
-    TRANSIENT_STATUSES.has(error.upstreamStatus)
-  );
+/** The upstream status of a transient server error, or undefined for any other error. */
+function transientStatus(error: unknown): number | undefined {
+  if (!(error instanceof LlmError) || error.upstreamStatus === undefined) {
+    return undefined;
+  }
+  return TRANSIENT_STATUSES.has(error.upstreamStatus) ? error.upstreamStatus : undefined;
 }
+
+/** A transient server error and what the session did about it. */
+export interface TransientErrorEvent {
+  readonly upstreamStatus: number;
+  /** `skipped`: too little time was left before the deadline for a retry. */
+  readonly retry: 'succeeded' | 'failed' | 'skipped';
+}
+
+export type TransientErrorListener = (event: TransientErrorEvent) => void;
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -158,6 +167,7 @@ class GeminiSession implements LlmSession {
   readonly #systemInstruction: string;
   readonly #responseSchema: JsonSchema;
   readonly #timing: RequestTiming;
+  readonly #onTransientError: TransientErrorListener;
   // Stateless multi-turn: with `store: false` the server keeps no history, so each request
   // resends every step. Model steps are kept unchanged, including thought signatures.
   #steps: Interactions.Step[] = [];
@@ -166,11 +176,13 @@ class GeminiSession implements LlmSession {
     interactions: InteractionsApi,
     model: string,
     timing: RequestTiming,
+    onTransientError: TransientErrorListener,
     options: LlmSessionOptions,
   ) {
     this.#interactions = interactions;
     this.#model = model;
     this.#timing = timing;
+    this.#onTransientError = onTransientError;
     this.#systemInstruction = options.systemInstruction;
     this.#responseSchema = options.responseSchema;
   }
@@ -193,22 +205,31 @@ class GeminiSession implements LlmSession {
   /**
    * Sends the request and, after a transient server error, sends it once more if a retry can
    * still finish before the deadline. A failed request leaves the history unchanged, so the
-   * retry sends exactly the same input.
+   * retry sends exactly the same input. Every transient error is reported with its outcome.
    */
   async #createWithRetry(input: Interactions.Step[]): Promise<GoogleGenAIInteraction> {
     try {
       return await this.#create(input);
     } catch (error) {
-      if (!isTransient(error)) {
+      const upstreamStatus = transientStatus(error);
+      if (upstreamStatus === undefined) {
         throw error;
       }
       const delayMs = RETRY_DELAY_MS.base + this.#timing.random() * RETRY_DELAY_MS.jitter;
       // Too little time for a retry: report the provider's error at once.
       if (this.#timing.timeLeft() - delayMs < MIN_RETRY_TIME_MS) {
+        this.#onTransientError({ upstreamStatus, retry: 'skipped' });
         throw error;
       }
       await this.#timing.sleep(delayMs);
-      return this.#create(input);
+      try {
+        const interaction = await this.#create(input);
+        this.#onTransientError({ upstreamStatus, retry: 'succeeded' });
+        return interaction;
+      } catch (retryError) {
+        this.#onTransientError({ upstreamStatus, retry: 'failed' });
+        throw retryError;
+      }
     }
   }
 
@@ -253,6 +274,8 @@ export interface GeminiClientOptions {
   readonly sleep?: (ms: number) => Promise<void>;
   /** Returns a number in [0, 1) for the retry jitter. */
   readonly random?: () => number;
+  /** Told about every transient server error and its retry, e.g. to log how often they occur. */
+  readonly onTransientError?: TransientErrorListener;
 }
 
 /** Gemini Developer API adapter (Interactions API). */
@@ -260,6 +283,7 @@ export class GeminiLlmClient implements LlmClient {
   readonly #interactions: InteractionsApi;
   readonly #model: string;
   readonly #timing: RequestTiming;
+  readonly #onTransientError: TransientErrorListener;
 
   constructor(
     interactions: InteractionsApi,
@@ -269,18 +293,26 @@ export class GeminiLlmClient implements LlmClient {
       now = Date.now,
       sleep = wait,
       random = Math.random,
+      onTransientError = () => undefined,
     }: GeminiClientOptions = {},
   ) {
     this.#interactions = interactions;
     this.#model = model;
     this.#timing = { timeLeft: () => deadline - now(), sleep, random };
+    this.#onTransientError = onTransientError;
   }
 
   startSession(options: LlmSessionOptions): LlmSession {
-    return new GeminiSession(this.#interactions, this.#model, this.#timing, {
-      ...options,
-      responseSchema: toGeminiSchema(options.responseSchema) as JsonSchema,
-    });
+    return new GeminiSession(
+      this.#interactions,
+      this.#model,
+      this.#timing,
+      this.#onTransientError,
+      {
+        ...options,
+        responseSchema: toGeminiSchema(options.responseSchema) as JsonSchema,
+      },
+    );
   }
 }
 
@@ -288,10 +320,11 @@ export function createGeminiLlmClient(options: {
   apiKey: string;
   model: string;
   deadline?: number;
+  onTransientError?: TransientErrorListener;
 }): LlmClient {
   return new GeminiLlmClient(
     new GoogleGenAI({ apiKey: options.apiKey }).interactions,
     options.model,
-    { deadline: options.deadline },
+    { deadline: options.deadline, onTransientError: options.onTransientError },
   );
 }

@@ -55,7 +55,9 @@ export default defineConfig([
   {
     files: ['api/**/*.ts'],
     rules: {
-      'no-console': ['error', { allow: ['error'] }],
+      // Errors, and warnings for events after which the analysis can still succeed, such as a
+      // retried transient model error; Vercel keeps them at separate log levels.
+      'no-console': ['error', { allow: ['warn', 'error'] }],
     },
   },
   {

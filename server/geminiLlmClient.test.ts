@@ -14,6 +14,7 @@ import {
   toGeminiSchema,
   toLlmError,
   type InteractionsApi,
+  type TransientErrorEvent,
 } from './geminiLlmClient.ts';
 import { LlmError } from './llmClient.ts';
 import { LLM_RESPONSE_JSON_SCHEMA } from './llmOutputSchema.ts';
@@ -294,6 +295,7 @@ describe('GeminiLlmClient retry after a transient error', () => {
   ) {
     const fake = fakeInteractions(responses);
     const waits: number[] = [];
+    const events: TransientErrorEvent[] = [];
     let now = 0;
     const client = new GeminiLlmClient(fake.api, 'gemini-test', {
       deadline,
@@ -304,8 +306,9 @@ describe('GeminiLlmClient retry after a transient error', () => {
         return Promise.resolve();
       },
       random,
+      onTransientError: (event) => events.push(event),
     });
-    return { fake, waits, session: client.startSession(SESSION_OPTIONS) };
+    return { fake, waits, events, session: client.startSession(SESSION_OPTIONS) };
   }
 
   it.each([503, 500])('retries once after a %i and returns the reply', async (status) => {
@@ -388,6 +391,45 @@ describe('GeminiLlmClient retry after a transient error', () => {
     await expect(session.send('Analyze.')).rejects.toBeInstanceOf(LlmError);
     expect(fake.calls).toHaveLength(1);
     expect(waits).toEqual([]);
+  });
+
+  it('reports a transient error whose retry succeeded', async () => {
+    const { events, session } = clientOnClock([new FakeApiError(503), completed('{}')]);
+
+    await session.send('Analyze.');
+
+    expect(events).toEqual([{ upstreamStatus: 503, retry: 'succeeded' }]);
+  });
+
+  it('reports a transient error whose retry failed, with the status of the first error', async () => {
+    const { events, session } = clientOnClock([new FakeApiError(500), new FakeApiError(503)]);
+
+    await expect(session.send('Analyze.')).rejects.toBeInstanceOf(LlmError);
+
+    expect(events).toEqual([{ upstreamStatus: 500, retry: 'failed' }]);
+  });
+
+  it('reports a transient error skipped for lack of time', async () => {
+    const { events, session } = clientOnClock([new FakeApiError(503)], {
+      deadline: MIN_RETRY_TIME_MS,
+    });
+
+    await expect(session.send('Analyze.')).rejects.toBeInstanceOf(LlmError);
+
+    expect(events).toEqual([{ upstreamStatus: 503, retry: 'skipped' }]);
+  });
+
+  it.each<[string, GoogleGenAIInteraction | Error]>([
+    ['a successful request', completed('{}')],
+    ['a 429', new FakeApiError(429)],
+    ['a 504', new FakeApiError(504)],
+    ['a timeout', new FakeTimeoutError()],
+  ])('reports nothing after %s', async (_case, response) => {
+    const { events, session } = clientOnClock([response]);
+
+    await session.send('Analyze.').catch(() => undefined);
+
+    expect(events).toEqual([]);
   });
 
   it('keeps one copy of the message in the history after a retry', async () => {

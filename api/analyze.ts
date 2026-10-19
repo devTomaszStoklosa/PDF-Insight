@@ -1,8 +1,26 @@
 import { loadConfig } from '../server/config.ts';
-import { ANALYSIS_BUDGET_MS, createGeminiLlmClient } from '../server/geminiLlmClient.ts';
+import {
+  ANALYSIS_BUDGET_MS,
+  createGeminiLlmClient,
+  type TransientErrorEvent,
+} from '../server/geminiLlmClient.ts';
 import { handleRequest, type RequestDependencies } from '../server/handleRequest.ts';
 import { withAppVersion } from '../server/http.ts';
 import { createUpstashRateLimiter } from '../server/upstashRateLimiter.ts';
+
+// A warning, not an error: after a successful retry the analysis still succeeds. A failure
+// that reaches the user is logged once more by handleRequest. Codes and statuses only.
+function logTransientError(event: TransientErrorEvent): void {
+  console.warn(
+    JSON.stringify({
+      level: 'warn',
+      source: 'api/analyze',
+      code: 'LLM_TRANSIENT_ERROR',
+      upstreamStatus: event.upstreamStatus,
+      retry: event.retry,
+    }),
+  );
+}
 
 // Vercel Node.js function using Web-standard Request/Response. The LLM API key and the
 // Upstash token are read from server-side environment variables only and never reach the
@@ -15,6 +33,7 @@ const dependencies: RequestDependencies = {
       apiKey: config.llmApiKey,
       model: config.llmModel,
       deadline: Date.now() + ANALYSIS_BUDGET_MS,
+      onTransientError: logTransientError,
     }),
   createRateLimiter: (config) => createUpstashRateLimiter(config.rateLimitStore),
   logError: (entry) => {
