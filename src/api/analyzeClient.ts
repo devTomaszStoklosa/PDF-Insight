@@ -31,8 +31,9 @@ export const ANALYZE_MESSAGES = {
   notConfigured:
     'Aplikacja nie ma skonfigurowanego adresu usługi analizy. Skontaktuj się z autorem strony.',
   textTooLong: `Dokument zawiera za dużo tekstu do analizy (maksymalnie ${formatNumber(MAX_TEXT_CHARS)} znaków). Wybierz krótszy plik.`,
-  network:
-    'Nie udało się połączyć z usługą analizy. Sprawdź połączenie z internetem i spróbuj ponownie.',
+  // Neutral on purpose: the same error appears when the API is down, not only when the
+  // user's connection fails.
+  network: 'Nie udało się połączyć z usługą analizy. Spróbuj ponownie za chwilę.',
   timeout: 'Analiza trwa zbyt długo. Spróbuj ponownie za chwilę.',
   invalidResponse: 'Usługa analizy zwróciła niepoprawną odpowiedź. Spróbuj ponownie.',
   payloadTooLarge: 'Dokument jest za duży do analizy. Wybierz krótszy plik.',
