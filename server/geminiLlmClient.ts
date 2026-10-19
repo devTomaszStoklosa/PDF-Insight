@@ -24,7 +24,13 @@ export interface InteractionsApi {
 }
 
 const MAX_OUTPUT_TOKENS = 16_000;
-const REQUEST_TIMEOUT_MS = 90_000;
+// Extraction and summarising need little reasoning. With the model's default thinking level,
+// the analysis of a one-page document did not finish within 90 s.
+const THINKING_LEVEL = 'low';
+// The analyzer sends at most two requests, so the server answers within about 50 s, before
+// the browser gives up after ANALYZE_TIMEOUT_MS (60 s, src/api/analyzeClient.ts) and within
+// maxDuration in vercel.json.
+export const REQUEST_TIMEOUT_MS = 25_000;
 
 // No transport retries: every request counts against the free-tier quota, and the
 // analyzer already makes exactly one self-correction retry.
@@ -60,6 +66,12 @@ function readStatus(error: unknown): number | undefined {
   return undefined;
 }
 
+function isTimeout(error: unknown): boolean {
+  // The SDK reports `timeout_ms` running out as APIConnectionTimeoutError, which has no
+  // status and is not exported either.
+  return error instanceof Error && error.name === 'APIConnectionTimeoutError';
+}
+
 function readRetryAfterSeconds(error: unknown): number | undefined {
   if (!(error instanceof Error && 'headers' in error && error.headers instanceof Headers)) {
     return undefined;
@@ -70,6 +82,10 @@ function readRetryAfterSeconds(error: unknown): number | undefined {
 
 /** Maps SDK errors to LlmError; provider messages are dropped, as they may quote the request. */
 export function toLlmError(error: unknown): LlmError {
+  if (isTimeout(error)) {
+    return new LlmError('timeout', { cause: error });
+  }
+
   const upstreamStatus = readStatus(error);
 
   if (upstreamStatus === 429) {
@@ -127,7 +143,10 @@ class GeminiSession implements LlmSession {
             mime_type: 'application/json',
             schema: this.#responseSchema,
           },
-          generation_config: { max_output_tokens: MAX_OUTPUT_TOKENS },
+          generation_config: {
+            max_output_tokens: MAX_OUTPUT_TOKENS,
+            thinking_level: THINKING_LEVEL,
+          },
           // Do not keep document text on Google's servers after the call.
           store: false,
         },

@@ -21,7 +21,7 @@ export interface LlmClient {
   startSession(options: LlmSessionOptions): LlmSession;
 }
 
-export type LlmErrorKind = 'quota_exceeded' | 'misconfigured' | 'unavailable';
+export type LlmErrorKind = 'quota_exceeded' | 'misconfigured' | 'unavailable' | 'timeout';
 
 /** A provider failure, already stripped of provider error messages and request data. */
 export class LlmError extends Error {
