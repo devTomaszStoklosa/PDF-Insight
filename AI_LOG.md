@@ -20,7 +20,7 @@ and reviewed by me.
   Pages base path).
 - **GitHub CLI (`gh`):** issues, pull requests and CI status.
 - **Inside the product, not a development tool:** the Google Gemini API (free tier, default
-  model `gemini-3.8-flash`), called only through the server-side proxy `api/analyze.ts`.
+  model `gemini-3.1-flash-lite`), called only through the server-side proxy `api/analyze.ts`.
 
 ### Working rules for the agent
 

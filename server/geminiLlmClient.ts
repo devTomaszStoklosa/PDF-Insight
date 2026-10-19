@@ -24,8 +24,8 @@ export interface InteractionsApi {
 }
 
 const MAX_OUTPUT_TOKENS = 16_000;
-// Extraction and summarising need little reasoning. With the model's default thinking level,
-// the analysis of a one-page document did not finish within 90 s.
+// Extraction and summarising need little reasoning. Not every model accepts 'minimal'
+// (gemini-3.8-flash answers 400), so 'low' is the lowest level used.
 const THINKING_LEVEL = 'low';
 // The analyzer sends at most two requests, so the server answers within about 50 s, before
 // the browser gives up after ANALYZE_TIMEOUT_MS (60 s, src/api/analyzeClient.ts) and within
