@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createInsight } from '../test/insightFixture.ts';
-import {
-  ANALYZE_MESSAGES,
-  createAnalyzeClient,
-  MAX_TEXT_CHARS,
-  type AnalyzeInput,
-} from './analyzeClient.ts';
+import { MAX_TEXT_CHARS } from '../types/analyzeLimits.ts';
+import { ANALYZE_MESSAGES, createAnalyzeClient, type AnalyzeInput } from './analyzeClient.ts';
 
 const API_URL = 'https://api.example.test/';
 const input: AnalyzeInput = { fileName: 'faktura-03-2024.pdf', pages: 2, text: 'Faktura VAT.' };

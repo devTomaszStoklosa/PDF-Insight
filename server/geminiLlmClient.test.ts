@@ -7,6 +7,7 @@ import type {
 import { describe, expect, it } from 'vitest';
 import { ANALYZE_TIMEOUT_MS } from '../src/api/analyzeClient.ts';
 import {
+  ANALYSIS_BUDGET_MS,
   GeminiLlmClient,
   REQUEST_TIMEOUT_MS,
   toGeminiSchema,
@@ -164,14 +165,54 @@ describe('GeminiLlmClient', () => {
     });
   });
 
-  it('fits two requests within the browser timeout and the function time limit', () => {
+  it('cuts the request timeout to the time left before the deadline', async () => {
+    const fake = fakeInteractions([
+      interaction('completed', [modelOutput('{}')], '{}'),
+      interaction('completed', [modelOutput('{}')], '{}'),
+    ]);
+    let now = 1_000;
+    const client = new GeminiLlmClient(fake.api, 'gemini-test', {
+      deadline: 1_000 + REQUEST_TIMEOUT_MS + 5_000,
+      now: () => now,
+    });
+
+    await client.startSession(SESSION_OPTIONS).send('Analyze.');
+    now += 15_000;
+    await client.startSession(SESSION_OPTIONS).send('Analyze.');
+
+    expect(fake.requestOptions.map((options) => options?.timeout_ms)).toEqual([
+      REQUEST_TIMEOUT_MS,
+      REQUEST_TIMEOUT_MS - 10_000,
+    ]);
+  });
+
+  it('fails as a timeout without a request once the deadline has passed', async () => {
+    const fake = fakeInteractions([interaction('completed', [modelOutput('{}')], '{}')]);
+    const client = new GeminiLlmClient(fake.api, 'gemini-test', {
+      deadline: 5_000,
+      now: () => 5_000,
+    });
+
+    const error: unknown = await client
+      .startSession(SESSION_OPTIONS)
+      .send('Analyze.')
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(LlmError);
+    expect((error as LlmError).kind).toBe('timeout');
+    expect(fake.calls).toHaveLength(0);
+  });
+
+  it('fits a single-call analysis in the budget, and the budget in the outer time limits', () => {
     const vercelConfig = JSON.parse(
       readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'),
     ) as { functions: Record<string, { maxDuration: number }> };
     const maxDurationMs = (vercelConfig.functions['api/analyze.ts']?.maxDuration ?? 0) * 1000;
 
-    expect(2 * REQUEST_TIMEOUT_MS).toBeLessThan(ANALYZE_TIMEOUT_MS);
-    expect(2 * REQUEST_TIMEOUT_MS).toBeLessThan(maxDurationMs);
+    // A request and its correction retry are never cut short by the deadline.
+    expect(2 * REQUEST_TIMEOUT_MS).toBeLessThanOrEqual(ANALYSIS_BUDGET_MS);
+    expect(ANALYSIS_BUDGET_MS).toBeLessThan(ANALYZE_TIMEOUT_MS);
+    expect(ANALYSIS_BUDGET_MS).toBeLessThan(maxDurationMs);
   });
 
   it('resends the full history, model steps unchanged, on the next message', async () => {

@@ -18,3 +18,13 @@ export type LlmInsight = z.infer<typeof llmInsightSchema>;
  * sentence count cannot be expressed in JSON Schema, so Zod validation stays authoritative.
  */
 export const LLM_RESPONSE_JSON_SCHEMA: JsonSchema = z.toJSONSchema(llmInsightSchema);
+
+/**
+ * What the final call for a document analyzed in parts returns: the summary and key points
+ * of the whole document, written from the analyses of its parts.
+ */
+export const llmOverviewSchema = documentInsightSchema.pick({ summary: true, keyPoints: true });
+
+export type LlmOverview = z.infer<typeof llmOverviewSchema>;
+
+export const OVERVIEW_RESPONSE_JSON_SCHEMA: JsonSchema = z.toJSONSchema(llmOverviewSchema);

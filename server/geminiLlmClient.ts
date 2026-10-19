@@ -27,17 +27,22 @@ const MAX_OUTPUT_TOKENS = 16_000;
 // Extraction and summarising need little reasoning. Not every model accepts 'minimal'
 // (gemini-3.8-flash answers 400), so 'low' is the lowest level used.
 const THINKING_LEVEL = 'low';
-// The analyzer sends at most two requests, so the server answers within about 50 s, before
-// the browser gives up after ANALYZE_TIMEOUT_MS (60 s, src/api/analyzeClient.ts) and within
-// maxDuration in vercel.json.
+// Short enough that a single-call analysis, one request and its correction retry, always fits
+// within ANALYSIS_BUDGET_MS.
 export const REQUEST_TIMEOUT_MS = 25_000;
+/**
+ * Time the server gives one analysis. It stays below the browser's ANALYZE_TIMEOUT_MS (60 s,
+ * src/api/analyzeClient.ts) and maxDuration in vercel.json, so the user gets the server's own
+ * timeout error. A document analyzed in parts makes more requests, so their timeouts are cut
+ * to the time left.
+ */
+export const ANALYSIS_BUDGET_MS = 50_000;
 
 // No transport retries: every request counts against the free-tier quota, and the
 // analyzer already makes exactly one self-correction retry.
-const REQUEST_OPTIONS: GoogleGenAIRequestOptions = {
-  timeout_ms: REQUEST_TIMEOUT_MS,
-  retries: { strategy: 'none' },
-};
+function requestOptions(timeoutMs: number): GoogleGenAIRequestOptions {
+  return { timeout_ms: timeoutMs, retries: { strategy: 'none' } };
+}
 
 // Keywords Gemini does not document for response schemas. Zod still enforces them
 // when the reply is validated.
@@ -117,18 +122,30 @@ class GeminiSession implements LlmSession {
   readonly #model: string;
   readonly #systemInstruction: string;
   readonly #responseSchema: JsonSchema;
+  readonly #timeoutMs: () => number;
   // Stateless multi-turn: with `store: false` the server keeps no history, so each request
   // resends every step. Model steps are kept unchanged, including thought signatures.
   #steps: Interactions.Step[] = [];
 
-  constructor(interactions: InteractionsApi, model: string, options: LlmSessionOptions) {
+  constructor(
+    interactions: InteractionsApi,
+    model: string,
+    timeoutMs: () => number,
+    options: LlmSessionOptions,
+  ) {
     this.#interactions = interactions;
     this.#model = model;
+    this.#timeoutMs = timeoutMs;
     this.#systemInstruction = options.systemInstruction;
     this.#responseSchema = options.responseSchema;
   }
 
   async send(message: string): Promise<LlmReply> {
+    const timeoutMs = this.#timeoutMs();
+    // The deadline has passed: fail as a timeout without spending a request of the quota.
+    if (timeoutMs <= 0) {
+      throw new LlmError('timeout');
+    }
     const input = [...this.#steps, userInput(message)];
 
     let interaction: GoogleGenAIInteraction;
@@ -150,7 +167,7 @@ class GeminiSession implements LlmSession {
           // Do not keep document text on Google's servers after the call.
           store: false,
         },
-        REQUEST_OPTIONS,
+        requestOptions(timeoutMs),
       );
     } catch (error) {
       throw toLlmError(error);
@@ -168,27 +185,44 @@ class GeminiSession implements LlmSession {
   }
 }
 
+export interface GeminiClientOptions {
+  /** Epoch milliseconds by which every request must end; each timeout is cut to fit. */
+  readonly deadline?: number;
+  readonly now?: () => number;
+}
+
 /** Gemini Developer API adapter (Interactions API). */
 export class GeminiLlmClient implements LlmClient {
   readonly #interactions: InteractionsApi;
   readonly #model: string;
+  readonly #timeoutMs: () => number;
 
-  constructor(interactions: InteractionsApi, model: string) {
+  constructor(
+    interactions: InteractionsApi,
+    model: string,
+    { deadline = Number.POSITIVE_INFINITY, now = Date.now }: GeminiClientOptions = {},
+  ) {
     this.#interactions = interactions;
     this.#model = model;
+    this.#timeoutMs = () => Math.min(REQUEST_TIMEOUT_MS, deadline - now());
   }
 
   startSession(options: LlmSessionOptions): LlmSession {
-    return new GeminiSession(this.#interactions, this.#model, {
+    return new GeminiSession(this.#interactions, this.#model, this.#timeoutMs, {
       ...options,
       responseSchema: toGeminiSchema(options.responseSchema) as JsonSchema,
     });
   }
 }
 
-export function createGeminiLlmClient(options: { apiKey: string; model: string }): LlmClient {
+export function createGeminiLlmClient(options: {
+  apiKey: string;
+  model: string;
+  deadline?: number;
+}): LlmClient {
   return new GeminiLlmClient(
     new GoogleGenAI({ apiKey: options.apiKey }).interactions,
     options.model,
+    { deadline: options.deadline },
   );
 }

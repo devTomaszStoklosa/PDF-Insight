@@ -3,26 +3,51 @@ import type { AnalyzeRequest } from './requestBody.ts';
 
 const MAX_CORRECTION_ERROR_CHARS = 2_000;
 
-// The document is wrapped in these tags. Occurrences inside untrusted text are escaped,
-// so a document cannot close the data block early and smuggle in text that looks like
-// it comes from outside the document.
-const DELIMITER_TAG = /<(\/?)(document|metadata)/gi;
+// The document, and the analyses of its parts, are wrapped in these tags. Occurrences
+// inside untrusted text are escaped, so a document cannot close the data block early and
+// smuggle in text that looks like it comes from outside the document.
+const DELIMITER_TAG = /<(\/?)(document|metadata|parts)/gi;
 
-function escapeDelimiters(text: string): string {
+export function escapeDelimiters(text: string): string {
   return text.replace(DELIMITER_TAG, '&lt;$1$2');
+}
+
+function buildDataPrompt(metadata: Readonly<Record<string, unknown>>, text: string): string[] {
+  return [
+    '<metadata>',
+    escapeDelimiters(JSON.stringify(metadata)),
+    '</metadata>',
+    '<document>',
+    escapeDelimiters(text),
+    '</document>',
+  ];
 }
 
 /** Formats the request as the user message: metadata and text, both as untrusted data. */
 export function buildDocumentPrompt(input: AnalyzeRequest): string {
-  const metadata = JSON.stringify({ fileName: input.fileName, pages: input.pages });
   return [
-    '<metadata>',
-    escapeDelimiters(metadata),
-    '</metadata>',
-    '<document>',
-    escapeDelimiters(input.text),
-    '</document>',
+    ...buildDataPrompt({ fileName: input.fileName, pages: input.pages }, input.text),
     'Analyze the document above and return the JSON object.',
+  ].join('\n');
+}
+
+/** Position of one part of a document that is analyzed in parts, counted from 1. */
+export interface DocumentPart {
+  readonly number: number;
+  readonly count: number;
+}
+
+/** Formats one part of a long document as the user message; `input.text` is the part. */
+export function buildDocumentPartPrompt(input: AnalyzeRequest, part: DocumentPart): string {
+  const metadata = {
+    fileName: input.fileName,
+    pages: input.pages,
+    part: part.number,
+    totalParts: part.count,
+  };
+  return [
+    ...buildDataPrompt(metadata, input.text),
+    `The document above is part ${String(part.number)} of ${String(part.count)} of a longer document. Analyze only this part and return the JSON object.`,
   ].join('\n');
 }
 

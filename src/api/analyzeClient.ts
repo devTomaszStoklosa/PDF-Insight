@@ -1,13 +1,13 @@
 import { z } from 'zod';
 import { formatNumber } from '../lib/formatters.ts';
 import { UserFacingError } from '../lib/userFacingError.ts';
+import { MAX_TEXT_CHARS } from '../types/analyzeLimits.ts';
 import { documentInsightSchema, type DocumentInsight } from '../types/schema.ts';
 
-/** Must match MAX_TEXT_CHARS in server/requestBody.ts, which rejects longer text with 413. */
-export const MAX_TEXT_CHARS = 150_000;
 /**
- * Must stay above two LLM requests (REQUEST_TIMEOUT_MS in server/geminiLlmClient.ts), so the
- * browser receives the server's answer, including its timeout error, instead of giving up first.
+ * Must stay above the server's time budget (ANALYSIS_BUDGET_MS in server/geminiLlmClient.ts),
+ * so the browser receives the server's answer, including its timeout error, instead of giving
+ * up first.
  */
 export const ANALYZE_TIMEOUT_MS = 60_000;
 const ANALYZE_PATH = '/api/analyze';

@@ -1,5 +1,5 @@
 import { loadConfig } from '../server/config.ts';
-import { createGeminiLlmClient } from '../server/geminiLlmClient.ts';
+import { ANALYSIS_BUDGET_MS, createGeminiLlmClient } from '../server/geminiLlmClient.ts';
 import { handleRequest, type RequestDependencies } from '../server/handleRequest.ts';
 import { withAppVersion } from '../server/http.ts';
 import { createUpstashRateLimiter } from '../server/upstashRateLimiter.ts';
@@ -9,8 +9,13 @@ import { createUpstashRateLimiter } from '../server/upstashRateLimiter.ts';
 // browser.
 const dependencies: RequestDependencies = {
   loadConfig: () => loadConfig(process.env),
+  // Created once per analysis, after the request is checked, so the deadline counts from there.
   createLlmClient: (config) =>
-    createGeminiLlmClient({ apiKey: config.llmApiKey, model: config.llmModel }),
+    createGeminiLlmClient({
+      apiKey: config.llmApiKey,
+      model: config.llmModel,
+      deadline: Date.now() + ANALYSIS_BUDGET_MS,
+    }),
   createRateLimiter: (config) => createUpstashRateLimiter(config.rateLimitStore),
   logError: (entry) => {
     console.error(JSON.stringify({ level: 'error', source: 'api/analyze', ...entry }));

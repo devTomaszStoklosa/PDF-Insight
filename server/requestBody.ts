@@ -1,10 +1,9 @@
 import { z } from 'zod';
+import { MAX_TEXT_CHARS } from '../src/types/analyzeLimits.ts';
 import { HttpError } from './errors.ts';
 
-/** About 40k tokens: enough for a typical contract or report, bounded in LLM cost and time. */
-export const MAX_TEXT_CHARS = 150_000;
 /** Covers MAX_TEXT_CHARS of multi-byte UTF-8 text plus JSON escaping. */
-export const MAX_BODY_BYTES = 1_000_000;
+export const MAX_BODY_BYTES = 1_500_000;
 
 const MAX_FILE_NAME_CHARS = 255;
 const MAX_PAGES = 10_000;
