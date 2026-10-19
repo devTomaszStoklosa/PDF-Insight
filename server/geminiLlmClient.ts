@@ -79,8 +79,14 @@ export function toLlmError(error: unknown): LlmError {
       cause: error,
     });
   }
-  // Invalid key (401/403) or unknown model (404): fixable only in the server configuration.
-  if (upstreamStatus === 401 || upstreamStatus === 403 || upstreamStatus === 404) {
+  // Invalid key (400 API_KEY_INVALID, 401/403), unknown model (404) or another request the
+  // proxy built and Gemini rejected (400): not transient, fixable only on the server.
+  if (
+    upstreamStatus === 400 ||
+    upstreamStatus === 401 ||
+    upstreamStatus === 403 ||
+    upstreamStatus === 404
+  ) {
     return new LlmError('misconfigured', { upstreamStatus, cause: error });
   }
   return new LlmError('unavailable', { upstreamStatus, cause: error });
