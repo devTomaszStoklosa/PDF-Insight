@@ -23,6 +23,7 @@ const LLM_ERROR_CODES: Readonly<Record<LlmErrorKind, ApiErrorCode>> = {
   quota_exceeded: 'LLM_QUOTA_EXCEEDED',
   misconfigured: 'SERVER_MISCONFIGURED',
   unavailable: 'LLM_UNAVAILABLE',
+  timeout: 'LLM_TIMEOUT',
 };
 
 function toHttpError(error: unknown): HttpError {

@@ -7,6 +7,7 @@ export type ApiErrorCode =
   | 'LLM_INVALID_OUTPUT'
   | 'LLM_QUOTA_EXCEEDED'
   | 'LLM_UNAVAILABLE'
+  | 'LLM_TIMEOUT'
   | 'SERVER_MISCONFIGURED'
   | 'INTERNAL_ERROR';
 
@@ -50,6 +51,11 @@ const API_ERRORS: Readonly<Record<ApiErrorCode, ApiErrorDefinition>> = {
   LLM_UNAVAILABLE: {
     status: 503,
     message: 'Usługa analizy dokumentów jest chwilowo niedostępna. Spróbuj ponownie później.',
+  },
+  // 504: the upstream model did not answer within the proxy's time limit.
+  LLM_TIMEOUT: {
+    status: 504,
+    message: 'Model AI nie odpowiedział na czas. Spróbuj ponownie za chwilę.',
   },
   SERVER_MISCONFIGURED: {
     status: 500,
