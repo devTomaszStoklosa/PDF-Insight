@@ -81,6 +81,19 @@ describe('createHistoryStore', () => {
     expect(createStore(storage).load()).toEqual([valid]);
   });
 
+  it('ignores entries saved by the version with the previous result layout', () => {
+    const storage = createMemoryStorage();
+    const { document, ...analysis } = createInsight();
+    const previousEntry = {
+      id: 'old',
+      savedAt: '2026-10-19T12:00:00.000Z',
+      insight: { type: document.type, document: { ...document, ...analysis } },
+    };
+    storage.setItem('pdf-insight:history:v1', JSON.stringify([previousEntry]));
+
+    expect(createStore(storage).load()).toEqual([]);
+  });
+
   it('ignores stored data that is not valid JSON', () => {
     const storage = createMemoryStorage();
     storage.setItem(STORAGE_KEY, '{not json');

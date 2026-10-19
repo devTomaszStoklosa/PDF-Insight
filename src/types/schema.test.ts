@@ -139,6 +139,65 @@ describe('documentInsightSchema', () => {
 
       expect(result.data?.document.title).toBe('Umowa najmu');
     });
+
+    it('accepts JSON in the layout of the example in the brief', () => {
+      // Section 04 of the brief, with enough sentences and key points to pass the limits.
+      const briefExample = `{
+        "document": {
+          "fileName": "umowa.pdf",
+          "pages": 4,
+          "language": "pl",
+          "type": "umowa",
+          "title": "Umowa serwisowa",
+          "date": "2026-09-01"
+        },
+        "summary": "Umowa określa zasady świadczenia usług serwisowych. Obowiązuje przez 12 miesięcy. Wynagrodzenie wynosi 12 500 zł.",
+        "keyPoints": ["Okres umowy 12 mies.", "Wynagrodzenie 12 500 zł", "Termin płatności 1 października 2026 r."],
+        "entities": {
+          "organizations": ["Przykład sp. z o.o."],
+          "people": []
+        },
+        "amounts": [
+          { "value": 12500.00, "currency": "PLN", "context": "wynagrodzenie" }
+        ],
+        "dates": [
+          { "date": "2026-10-01", "context": "termin płatności" }
+        ],
+        "keywords": ["serwis", "SLA"]
+      }`;
+
+      expect(documentInsightSchema.safeParse(JSON.parse(briefExample)).success).toBe(true);
+    });
+
+    it('outputs the keys in the order of the brief, whatever the input order', () => {
+      const insight = createValidInsight();
+      const reversed = Object.fromEntries(
+        Object.entries({
+          ...insight,
+          document: Object.fromEntries(Object.entries(insight.document).reverse()),
+        }).reverse(),
+      );
+
+      const parsed = documentInsightSchema.parse(reversed);
+
+      expect(Object.keys(parsed)).toEqual([
+        'document',
+        'summary',
+        'keyPoints',
+        'entities',
+        'amounts',
+        'dates',
+        'keywords',
+      ]);
+      expect(Object.keys(parsed.document)).toEqual([
+        'fileName',
+        'pages',
+        'language',
+        'type',
+        'title',
+        'date',
+      ]);
+    });
   });
 
   describe('invalid payloads', () => {
@@ -227,6 +286,16 @@ describe('documentInsightSchema', () => {
       ['empty keyword', withFields({ keywords: [''] }), ['keywords', 0]],
     ])('rejects %s', (_case, payload, path) => {
       expectInvalidAt(payload, path);
+    });
+
+    it('rejects the previous layout with the analysis inside document', () => {
+      const { document, ...analysis } = insight;
+      const previousLayout = {
+        type: document.type,
+        document: { ...omitKey(document, 'type'), ...analysis },
+      };
+
+      expect(documentInsightSchema.safeParse(previousLayout).success).toBe(false);
     });
 
     it.each([
