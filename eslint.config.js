@@ -59,6 +59,16 @@ export default defineConfig([
     },
   },
   {
+    // Local development tools run on Node.js and report to the terminal.
+    files: ['scripts/**/*.ts'],
+    languageOptions: {
+      globals: globals.node,
+    },
+    rules: {
+      'no-console': ['error', { allow: ['info', 'error'] }],
+    },
+  },
+  {
     files: ['**/*.js'],
     extends: [js.configs.recommended],
     languageOptions: {
