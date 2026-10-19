@@ -26,6 +26,17 @@ export function emptyResponse(status: number, headers?: HeaderInput): Response {
   return new Response(null, { status, headers: mergeHeaders(headers) });
 }
 
+/**
+ * Adds the commit the API was built from, so the post-deploy check can tell which version
+ * answers. Without a known version the response is returned unchanged.
+ */
+export function withAppVersion(response: Response, version: string | undefined): Response {
+  if (version !== undefined && version.trim() !== '') {
+    response.headers.set('X-App-Version', version.trim());
+  }
+  return response;
+}
+
 export function errorResponse(error: HttpError, headers?: HeaderInput): Response {
   const responseHeaders = mergeHeaders(headers);
   if (error.retryAfterSeconds !== undefined) {
