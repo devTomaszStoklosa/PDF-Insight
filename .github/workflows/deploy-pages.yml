@@ -1,0 +1,71 @@
+name: Deploy to GitHub Pages
+
+# Pull requests run the checks and the build only; deploys happen from main.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time; a newer push waits instead of cancelling one in progress.
+# Pull request runs are grouped per branch and replaced by newer pushes.
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.ref) || 'pages' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+
+      # A demo without the API URL would only show a "not configured" error, so do not deploy it.
+      - name: Require VITE_API_URL for deploys
+        if: github.event_name != 'pull_request'
+        env:
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+        run: |
+          if [ -z "$VITE_API_URL" ]; then
+            echo "::error::Set the repository variable VITE_API_URL (Settings > Secrets and variables > Actions > Variables) to the API base URL."
+            exit 1
+          fi
+
+      # VITE_* values are inlined into the public bundle: the API URL is a variable, never a secret.
+      - name: Build
+        env:
+          VITE_BASE_PATH: /PDF-Insight/
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+        run: npm run build
+
+      - uses: actions/upload-pages-artifact@v5
+        if: github.event_name != 'pull_request'
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
