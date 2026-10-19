@@ -2,8 +2,8 @@
 
 This log documents how AI was used to build PDF Insight: the tools, the key prompts, where the
 AI agent went wrong and how it was corrected. Every entry can be traced to a Claude Code
-session in this repository, an issue or pull request (#1–#14), or the git history. It describes
-the state on 2026-10-19.
+session in this repository, an issue or pull request (#1–#42), or the git history. It describes
+the state at submission, on 2026-10-20.
 
 The log itself was drafted with Claude Code from the session transcripts and the git history,
 and reviewed by me.
@@ -19,8 +19,9 @@ and reviewed by me.
   request (UI states, keyboard navigation, 360 px layout, light and dark themes, the GitHub
   Pages base path).
 - **GitHub CLI (`gh`):** issues, pull requests and CI status.
-- **Inside the product, not a development tool:** the Google Gemini API (free tier, default
-  model `gemini-3.1-flash-lite`), called only through the server-side proxy `api/analyze.ts`.
+- **Inside the product, not development tools:** the Google Gemini API (free tier, default
+  model `gemini-3.1-flash-lite`), called only through the server-side proxy `api/analyze.ts`,
+  and Upstash Redis (free plan), which counts requests for the request limit.
 
 ### Working rules for the agent
 
@@ -40,7 +41,8 @@ session:
 
 ## Kluczowe Prompty (Key Prompts)
 
-Every main prompt had the same four-part structure:
+Every main build prompt (1–5) had the same four-part structure; the review prompt (6) was a
+short request with the brief attached:
 
 - **Role:** a persona with a matching area of expertise ("You are a Senior TypeScript
   Engineer…").
@@ -71,7 +73,9 @@ Every main prompt had the same four-part structure:
   validation. Dates use `z.iso.date()`, which also rejects impossible dates such as
   `2024-02-30`. Currencies must match `/^[A-Z]{3}$/`. Sentences are counted with
   `Intl.Segmenter`, so Polish abbreviations and dates ("Sp. z o.o.", "1.02.2024 r.") do not
-  split a sentence.
+  split a sentence. Two later fixes came from the review (prompt 6): the layout was moved to
+  the brief's schema (#19, see mistake 3), and currencies are checked against a list of ISO
+  4217 codes, not just three capital letters (#27).
 
 ### 3. LLM proxy with self-correction ("Backend and Security Expert")
 
@@ -112,8 +116,25 @@ Every main prompt had the same four-part structure:
 - **Outcome:** the workflow already existed in PR #12 (ticket #11, which the agent had drafted
   as an out-of-scope finding while working on #9). The agent checked the prompt against it item
   by item. The only gap was the file name: the prompt asks for `deploy.yml`, the file is
-  `deploy-pages.yml`. The agent proposed a rename, which is still undecided. PR #12 also adds
-  `npm run dev:api`, a local server for the real API handler.
+  `deploy-pages.yml`. The agent proposed a rename; I kept `deploy-pages.yml`, because the name
+  says what the workflow does. PR #12 also adds `npm run dev:api`, a local server for the real
+  API handler. After the review, the workflow gained a format check and a post-deploy check
+  that the API answers and runs the deployed commit (#22, #36).
+
+### 6. Pre-submission review ("Principal developer")
+
+- **Asked for:** "Zrób dokładny review jako Principal developer czy wszystko w tym projekcie
+  jest już gotowe zgodnie z załączonymi wymaganiami. Jeśli widzisz cokolwiek do dopracowania
+  daj znać" ("Review this project as a principal developer: is everything ready according to
+  the attached requirements? Tell me about anything that needs work."), with the brief
+  attached.
+- **Outcome:** the agent compared the repository with the brief section by section and called
+  the deployed API. It found that every request to the deployed API crashed (#18), that the
+  JSON layout and the output language did not match the brief (#19, #20), and smaller gaps
+  (#16, #21, #22, #24–#27). One security-related finding was reported privately instead of in
+  a public issue, and fixed in PR #34. I approved an order, and each finding went through its
+  own plan and pull request (PRs #28–#41). #24, splitting long documents into chunks, stays
+  open as a known limitation.
 
 ### Short steering prompts
 
@@ -127,6 +148,14 @@ Short replies that changed the agent's direction:
   CI extension that the agent proposed but would not add without my consent.
 - **"Yes, create the ticket about the invalid Gemini key mapping as drafted."**: turned a
   finding into ticket #13 instead of an unreviewed fix (see mistake 2).
+- **Pasting the Vercel build log for #18:** replaced the agent's first, assumed diagnosis with
+  the real one (see mistake 4).
+- **"I set LLM_API_KEY"** (in a local, git-ignored `.env.local`): allowed four measured calls
+  that found the real cause of the timeouts (see mistake 5).
+- **"In Vercel Hobby plan I don't have Vercel Firewall, so let's go with Option 2: Upstash
+  Redis"**: chose how the request limit is stored (PR #34).
+- **"Pomiń #24"** ("Skip #24"): kept the optional chunking of long documents out of the
+  submission.
 
 ## Potknięcia AI i Poprawki (AI Mistakes & Fixes)
 
@@ -141,7 +170,8 @@ Short replies that changed the agent's direction:
 - **How I corrected it:** before approving the plan, I replied "Chcę użyć w pełni darmowego
   API".
 - **The fix:** a revised plan, before any code was written:
-  - The provider became the Gemini Developer API free tier (`gemini-3.8-flash`). The agent
+  - The provider became the Gemini Developer API free tier (`gemini-3.8-flash`, later replaced
+    by `gemini-3.1-flash-lite`, see mistake 5). The agent
     compared alternatives and rejected them: Groq (the tokens-per-minute limit is too low for
     one document), OpenRouter free models (low daily caps, and the providers behind them may
     log prompts) and GitHub Models (about 8,000 input tokens per request).
@@ -165,25 +195,72 @@ Short replies that changed the agent's direction:
   and in the logs, a configuration error looked like a temporary outage.
 - **How it was handled:** the fix was outside the ticket, so the agent did not patch it on the
   side. It reported the file, the lines and the evidence, and I approved ticket #13 (`bug`).
-- **Status: open, not fixed yet.**
+- **Status: fixed** in PR #17: an upstream 400 now maps to `SERVER_MISCONFIGURED`.
 - **Lesson:** the unit tests used a fake LLM client with the status codes the agent assumed.
   Tests with fakes verify assumptions, not the provider's real behaviour; only a run against
   the real API exposed it.
 
-### 3. Proposing to change the specified schema layout
+### 3. A schema layout checked against the prompt instead of the brief
 
-- **What the AI did:** while planning the Zod contract, the agent pointed out that the spec puts
-  `summary`, `keyPoints`, `entities`, `amounts`, `dates` and `keywords` inside `document`. It
-  suggested the "more common" layout: metadata in `document`, the analysis fields at the top
-  level. It said it would follow the spec unless told otherwise.
-- **Why it was a problem:** the spec is the contract that the frontend, the backend and the
-  reviewers rely on. A "cleaner" layout would have broken the JSON structure every consumer
-  expects.
-- **How I corrected it:** "Follow the pasted spec layout as written: type at the top level,
-  everything else inside document."
-- **The fix:** `documentInsightSchema` follows the spec exactly, and `z.strictObject` turns any
-  deviation (a missing or extra key) into a validation error. This was a design suggestion, not
-  a code bug, and the agent raised it as a decision instead of changing the layout on its own.
+- **What the AI did:** while planning the Zod contract, the agent pointed out that the spec in
+  the prompt puts `summary`, `keyPoints`, `entities`, `amounts`, `dates` and `keywords` inside
+  `document`, and suggested the "more common" layout: metadata in `document`, the analysis at
+  the top level. I told it: "Follow the pasted spec layout as written: type at the top level,
+  everything else inside document." It did, without checking the pasted spec against the
+  brief, which had been attached at project setup.
+- **Why it was a problem:** the brief is the acceptance contract, and its schema (section 04)
+  has exactly the layout the agent first suggested: only the metadata, including `type`, in
+  `document`. The JSON preview and the downloaded file did not match it.
+- **How it was found:** the pre-submission review (prompt 6) compared the contract with the
+  brief's schema (#19).
+- **The fix:** PR #29 moved to the brief's layout and key order, generated the model's output
+  schema from it, and changed the history storage key, so entries in the old layout are
+  ignored. A test parses the example JSON from the brief.
+- **Lesson:** when a prompt restates a source document, check the restatement against the
+  source. The agent's suggestion was right, but it argued from "common practice" instead of
+  pointing to the brief, so the correction went the wrong way.
+
+### 4. The API was never checked where it runs
+
+- **What the AI did:** the proxy had unit tests and a local server, but the agent never called
+  the deployed Vercel function. Every production request crashed with
+  `FUNCTION_INVOCATION_FAILED` (#18). Its first fix plan then assumed the cause: switch the
+  imports from `.ts` to `.js` and run the local server with `tsx`.
+- **How it was found:** the pre-submission review called the deployed API. The real cause came
+  from the Vercel build log I pasted: Vercel compiles `api/*.ts` with the nearest
+  `tsconfig.json`, the root file without compiler options, so the output was CommonJS with
+  `.ts` import paths.
+- **The fix:** a revised plan before any code. PR #28 gives the root `tsconfig.json` ES module
+  options with `rewriteRelativeImportExtensions`, and a test repeats Vercel's compile. Later,
+  the Pages workflow started checking the deployed API after every deploy (#22, #36).
+- **Lesson:** passing local tests do not prove a deployment works, and a fix plan needs the
+  log, not a guess.
+
+### 5. Tuning the model without measuring it
+
+- **What the AI did:** the demo timed out, and the agent blamed the model's default thinking
+  level without measuring it. It planned `thinking_level: 'low'` and a 25 s limit per request
+  (#16). That plan also named the wrong SDK error class for a timeout; a quick test against a
+  local server that never answers showed the right one (`APIConnectionTimeoutError`) before
+  any code was written.
+- **How it was found:** after PR #30, every analysis still ended with 504 after 25 s. With my
+  key in a git-ignored `.env.local`, the agent made four measured calls: `gemini-3.8-flash`
+  wrote about 500 tokens in 21.6–35 s with 0 thinking tokens, answered 503 once, and rejected
+  `thinking_level: 'minimal'`. Two lite models answered in 2.5 and 5.6 s.
+- **The fix:** PR #30 kept the time budget and the new 504 `LLM_TIMEOUT`; PR #32 made
+  `gemini-3.1-flash-lite` the default and corrected the comment that blamed thinking (#31).
+- **Lesson:** measure before tuning. One timed call would have saved a release.
+
+### 6. Analysis always in Polish
+
+- **What the AI did:** the system prompt required Polish descriptive text "even when the
+  document is in another language", and the English few-shot example had Polish output.
+- **Why it was a problem:** the brief requires the summary and all values in the document's
+  language (#20).
+- **The fix:** PR #33 asks for the document's main language (`document.language`) and rewrote
+  the English example in English; tests check the rule and each example's language. On the
+  demo, an English agreement then got English output, and a Polish invoice Polish output.
+- **Lesson:** the same as mistake 3: every rule in a prompt should trace back to the brief.
 
 ### Smaller findings
 
@@ -199,6 +276,16 @@ Short replies that changed the agent's direction:
   conversion) rewrote `VITE_BASE_PATH=/PDF-Insight/` into a Windows path. This was an
   environment problem, not a code bug: local builds run with `MSYS_NO_PATHCONV=1`, and CI on
   Linux is not affected.
+- **Production on an older deployment.** After PR #34 was merged, six quick requests to the
+  demo API never got 429, and Redis held no counters for them. The agent traced it to a
+  redeploy of an older commit that was still the current production deployment in Vercel.
+  Nothing had reported it, which led to the commit check after each deploy (#36).
+- **A protection that protected nothing.** An early suggestion for the request limit included
+  a global daily cap. While planning PR #34, the agent dropped it: once used up, it blocks
+  everyone, exactly as the provider's own quota does.
+- **A lost executable bit.** On Windows, the commit for #22 stored
+  `scripts/check-api-preflight.sh` without its executable bit. The workflow calls it with
+  `bash`, so nothing broke; PR #41 restored the bit.
 
 ## Developer Ownership Statement
 
