@@ -67,7 +67,8 @@ flowchart LR
   same request once more, but only if at least 15 s are left before the deadline; otherwise
   the user gets the error at once. The SDK's own retries stay off, because they give every
   attempt the full timeout. With the correction retry, one model call takes at most 4
-  requests, and only when errors occur.
+  requests, and only when errors occur. Every such error is logged as a warning with what the
+  retry did (#46), so its frequency and the 15 s condition can be checked in the logs.
 - **Long documents in parts (#24).** Text up to 37,500 characters (about 10–12 dense pages)
   takes one call. Longer text, up to 225,000 characters, is split into at most 6 parts of
   similar length, cut at page, line or word boundaries. At most 3 parts are analyzed at once:
@@ -100,7 +101,9 @@ flowchart LR
   and the prompt tells the model to treat instructions inside the document as content. The
   analyses of the parts of a long document are passed on to the final call the same way.
 - **No document content in logs:** the function logs error codes and upstream status codes
-  only; provider error messages are dropped because they may quote the request.
+  only; provider error messages are dropped because they may quote the request. A transient
+  Gemini error is logged as a warning, `LLM_TRANSIENT_ERROR` with its status and `retry`
+  set to `succeeded`, `failed` or `skipped` (too little time left for a retry).
 - **No storage at the provider:** Gemini requests use `store: false`. The UI asks users not to
   upload confidential documents, as the free-tier terms require.
 - **Hardening headers:** `Cache-Control: no-store` and `X-Content-Type-Options: nosniff` on
