@@ -63,6 +63,11 @@ project:
   token of an Upstash Redis database (the free plan is enough). Both are required; without
   them the API answers `SERVER_MISCONFIGURED`.
 
+Keep "Automatically expose System Environment Variables" on (the default): every API
+response carries the deployed commit in `X-App-Version`, read from `VERCEL_GIT_COMMIT_SHA`.
+After each deploy, the Pages workflow waits until the API reports the commit it deployed,
+so a failed or unpromoted Vercel deployment fails the run.
+
 CORS limits which websites can read the responses; it does not authenticate callers.
 
 #### Request limit

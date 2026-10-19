@@ -73,8 +73,8 @@ jobs:
       - id: deployment
         uses: actions/deploy-pages@v5
 
-  # The demo is useless if its API is down or misconfigured. Vercel deploys the API on its
-  # own, so this confirms the API is up and configured, not that it runs this commit (#36).
+  # The demo is useless if its API is down, misconfigured or stuck on an older deployment.
+  # Vercel deploys the API on its own, so this waits until the API reports this commit.
   check-api:
     needs: deploy
     if: github.event_name != 'pull_request'
@@ -82,10 +82,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Check that the API answers the CORS preflight from the demo
+      - name: Check that the API runs this commit and answers the preflight from the demo
         env:
           VITE_API_URL: ${{ vars.VITE_API_URL }}
           PAGE_URL: ${{ needs.deploy.outputs.page_url }}
+          COMMIT: ${{ github.sha }}
         run: |
           origin=$(printf '%s' "$PAGE_URL" | grep -oE '^https://[^/]+')
-          bash scripts/check-api-preflight.sh "$VITE_API_URL" "$origin"
+          bash scripts/check-api-preflight.sh "$VITE_API_URL" "$origin" "$COMMIT"

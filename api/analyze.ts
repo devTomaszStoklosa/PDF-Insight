@@ -1,6 +1,7 @@
 import { loadConfig } from '../server/config.ts';
 import { createGeminiLlmClient } from '../server/geminiLlmClient.ts';
 import { handleRequest, type RequestDependencies } from '../server/handleRequest.ts';
+import { withAppVersion } from '../server/http.ts';
 import { createUpstashRateLimiter } from '../server/upstashRateLimiter.ts';
 
 // Vercel Node.js function using Web-standard Request/Response. The LLM API key and the
@@ -16,10 +17,19 @@ const dependencies: RequestDependencies = {
   },
 };
 
+// Vercel sets VERCEL_GIT_COMMIT_SHA to the deployment's commit; the post-deploy check in the
+// Pages workflow compares it with the commit it deployed.
+async function respond(request: Request): Promise<Response> {
+  return withAppVersion(
+    await handleRequest(request, dependencies),
+    process.env.VERCEL_GIT_COMMIT_SHA,
+  );
+}
+
 export function POST(request: Request): Promise<Response> {
-  return handleRequest(request, dependencies);
+  return respond(request);
 }
 
 export function OPTIONS(request: Request): Promise<Response> {
-  return handleRequest(request, dependencies);
+  return respond(request);
 }
