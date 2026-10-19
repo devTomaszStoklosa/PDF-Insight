@@ -15,12 +15,12 @@ the summary, the key points and the recent-analyses panel](docs/screenshot.jpg)
 flowchart LR
   subgraph Browser["Browser: React SPA on GitHub Pages"]
     PDF["PDF file, max. 10 MB"] --> Extract["Text extraction<br/>pdf.js in a web worker"]
-    Extract --> Client["API client<br/>max. 150,000 characters, 60 s"]
+    Extract --> Client["API client<br/>max. 225,000 characters, 60 s"]
     Client --> Check["Zod validation<br/>same schema as the server"]
     Check --> UI["Dashboard, JSON download,<br/>last 3 analyses in localStorage"]
   end
   subgraph Vercel["API proxy: Vercel function api/analyze.ts"]
-    Guard["CORS allowlist, body limits,<br/>request limit per IP"] --> Prompt["Prompt with the document<br/>as untrusted data"]
+    Guard["CORS allowlist, body limits,<br/>request limit per IP"] --> Prompt["Prompt with the document<br/>as untrusted data,<br/>long text in up to 6 parts"]
     Prompt --> Validate["Zod validation,<br/>one self-correction retry"]
   end
   Redis[("Upstash Redis<br/>request counters")]
@@ -34,7 +34,8 @@ flowchart LR
 1. The browser checks the file (PDF, max. 10 MB) and extracts its text layer with pdf.js. The
    file never leaves the device; only the text, the file name and the page count are sent.
 2. The Vercel function checks the origin, the body size and the request limit, then asks
-   Gemini for a JSON object constrained by a response schema.
+   Gemini for a JSON object constrained by a response schema. Text longer than 37,500
+   characters is analyzed in up to 6 parts, as described under Key decisions.
 3. The server validates the reply with Zod. An invalid reply gets exactly one correction
    request that quotes the validation error; a second invalid reply ends with 502
    `LLM_INVALID_OUTPUT`. Errors reach the user as Polish messages with a stable code.
@@ -59,11 +60,22 @@ flowchart LR
   3–5 summary sentences and 3–7 key points.
 - **Analysis in the document's language.** The summary, key points, contexts and keywords are
   written in the document's main language (`document.language`); keys stay in English.
-- **One self-correction retry.** Enough to fix a typical schema slip, while capping one
-  analysis at two model calls of the free quota.
-- **A fixed time budget.** Each Gemini request is limited to 25 s, so two requests fit within
-  the browser's 60 s limit and the function's 60 s `maxDuration`. A timeout ends as 504
-  `LLM_TIMEOUT` with its own message.
+- **One self-correction retry.** Enough to fix a typical schema slip, while capping each
+  model call at two requests of the free quota.
+- **Long documents in parts (#24).** Text up to 37,500 characters (about 10–12 dense pages)
+  takes one call. Longer text, up to 225,000 characters, is split into at most 6 parts of
+  similar length, cut at page, line or word boundaries. At most 3 parts are analyzed at once:
+  on the free tier, 3 parallel part-sized requests succeeded, while 6 got 503 for 5 of them.
+  The code merges the metadata and the lists: the title comes from the first part,
+  repeated names are dropped, and amounts and dates are dropped only when their context
+  repeats too. One more call then writes the summary and key points of the whole document from
+  the analyses of the parts. Each call has its own correction retry, and the result is
+  validated against the same schema.
+- **A fixed time budget.** Each Gemini request is limited to 25 s, and every request must end
+  within 50 s of the start of the analysis: a later request gets only the time left, and none
+  starts after that. The server therefore answers before the browser's 60 s limit and the
+  function's 60 s `maxDuration`, and a single call with its retry always fits. A timeout ends
+  as 504 `LLM_TIMEOUT` with its own message.
 - **A post-deploy check.** After each deploy from `main`, the Pages workflow sends a CORS
   preflight to the API and waits until it answers 204 and reports the deployed commit, so a
   crashing, misconfigured or outdated API fails the run.
@@ -75,11 +87,12 @@ flowchart LR
 - **CORS with an exact allowlist** of origins from `ALLOWED_ORIGIN`; look-alike origins and
   wildcards are rejected. CORS limits which websites can read responses; it is not
   authentication.
-- **Limits:** the file (10 MB, checked in the browser), the text (150,000 characters), the
-  request body (JSON only, 1 MB, counted while it is read) and the file name (255
-  characters), plus the request limit per IP described below.
+- **Limits:** the file (10 MB, checked in the browser), the text (225,000 characters, at most
+  6 parts and 3 model calls at once), the request body (JSON only, 1.5 MB, counted while it is
+  read) and the file name (255 characters), plus the request limit per IP described below.
 - **Untrusted input:** the document text is wrapped in delimiters that the text cannot close,
-  and the prompt tells the model to treat instructions inside the document as content.
+  and the prompt tells the model to treat instructions inside the document as content. The
+  analyses of the parts of a long document are passed on to the final call the same way.
 - **No document content in logs:** the function logs error codes and upstream status codes
   only; provider error messages are dropped because they may quote the request.
 - **No storage at the provider:** Gemini requests use `store: false`. The UI asks users not to
@@ -89,8 +102,14 @@ flowchart LR
 
 ## Known limitations
 
-- **Long documents:** text above 150,000 characters is rejected; there is no splitting into
-  chunks yet (#24).
+- **Long documents:** text above 225,000 characters is rejected. A long document uses up to
+  7 model calls (6 parts and the overview), plus any retries, while the request limit per IP
+  counts it as one analysis, so two long documents in a minute can reach the free-tier quota.
+  The longest documents take about 30 s, and a correction retry late in the analysis can end
+  it with 504 at 50 s. Two long documents analyzed at the same time can exceed the 3 parallel
+  requests the free tier accepts and end with 503. The overview is written from the analyses
+  of the parts, not from the full text, and the same amount described differently in two
+  parts is listed twice.
 - **Scans:** there is no OCR. A PDF without a text layer ends with a message asking for one.
 - **Free-tier quota and load:** when the quota is used up, the API answers 429
   `LLM_QUOTA_EXCEEDED`. Gemini sometimes answers 503 under load; trying again usually works.
