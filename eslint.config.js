@@ -45,6 +45,20 @@ export default defineConfig([
     },
   },
   {
+    // Serverless functions run on Node.js; console.error is their only log channel
+    // and must carry error codes only, never document content or secrets.
+    files: ['api/**/*.ts', 'server/**/*.ts'],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
+  {
+    files: ['api/**/*.ts'],
+    rules: {
+      'no-console': ['error', { allow: ['error'] }],
+    },
+  },
+  {
     files: ['**/*.js'],
     extends: [js.configs.recommended],
     languageOptions: {
