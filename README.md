@@ -54,7 +54,7 @@ project:
 
 - `LLM_API_KEY` (secret): use a Google Cloud project without billing, so requests above the
   free tier are rejected instead of charged.
-- `LLM_MODEL` (optional): defaults to `gemini-3.8-flash`.
+- `LLM_MODEL` (optional): defaults to `gemini-3.1-flash-lite`.
 - `ALLOWED_ORIGIN`: must include `https://devtomaszstoklosa.github.io`. An origin has no
   path, so it does not include `/PDF-Insight/`.
 
