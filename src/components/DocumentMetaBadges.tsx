@@ -18,7 +18,7 @@ export function DocumentMetaBadges({ insight }: DocumentMetaBadgesProps) {
     <ul className="badges" aria-label="Metadane dokumentu">
       <li className="badge badge--accent">
         <span className="visually-hidden">Typ dokumentu: </span>
-        {DOCUMENT_TYPE_LABELS[insight.type]}
+        {DOCUMENT_TYPE_LABELS[document.type]}
       </li>
       <li className="badge">{formatPageCount(document.pages)}</li>
       <li className="badge">

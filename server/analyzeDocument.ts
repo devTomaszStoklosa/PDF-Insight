@@ -46,7 +46,7 @@ function validateReply(reply: LlmReply, input: AnalyzeRequest): ReplyValidation 
   // fileName and pages come from the validated request; the full contract is checked once
   // more, so a response never leaves the server without matching documentInsightSchema.
   const insight = documentInsightSchema.parse({
-    type: result.data.type,
+    ...result.data,
     document: { fileName: input.fileName, pages: input.pages, ...result.data.document },
   });
   return { success: true, insight };

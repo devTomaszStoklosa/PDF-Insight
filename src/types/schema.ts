@@ -41,12 +41,19 @@ export const dateMentionSchema = z.strictObject({
 
 // Strict objects reject unknown keys, so contract drift between the LLM backend
 // and the frontend fails validation instead of being silently dropped.
-export const documentDetailsSchema = z.strictObject({
+// The layout and key order follow the schema in the brief: metadata in `document`,
+// the analysis at the top level.
+export const documentMetadataSchema = z.strictObject({
   fileName: nonEmptyText,
   pages: z.int().min(1),
   language: z.string().regex(/^[a-z]{2}$/, 'Expected an ISO 639-1 language code, e.g. "pl"'),
+  type: documentTypeSchema,
   title: nonEmptyText.nullable(),
   date: isoDate.nullable(),
+});
+
+export const documentInsightSchema = z.strictObject({
+  document: documentMetadataSchema,
   summary: summarySchema,
   keyPoints: z.array(nonEmptyText).min(KEY_POINTS.min).max(KEY_POINTS.max),
   entities: entitiesSchema,
@@ -55,14 +62,9 @@ export const documentDetailsSchema = z.strictObject({
   keywords: z.array(nonEmptyText),
 });
 
-export const documentInsightSchema = z.strictObject({
-  type: documentTypeSchema,
-  document: documentDetailsSchema,
-});
-
 export type DocumentType = z.infer<typeof documentTypeSchema>;
 export type Entities = z.infer<typeof entitiesSchema>;
 export type Amount = z.infer<typeof amountSchema>;
 export type DateMention = z.infer<typeof dateMentionSchema>;
-export type DocumentDetails = z.infer<typeof documentDetailsSchema>;
+export type DocumentMetadata = z.infer<typeof documentMetadataSchema>;
 export type DocumentInsight = z.infer<typeof documentInsightSchema>;

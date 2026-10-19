@@ -96,7 +96,8 @@ describe('createAnalyzeClient', () => {
   });
 
   it('rejects a response that does not match the contract', async () => {
-    const invalid = { ...createInsight(), type: 'list' };
+    const insight = createInsight();
+    const invalid = { ...insight, document: { ...insight.document, type: 'list' } };
 
     await expect(analyze(() => Promise.resolve(jsonResponse(invalid)))).rejects.toThrow(
       ANALYZE_MESSAGES.invalidResponse,

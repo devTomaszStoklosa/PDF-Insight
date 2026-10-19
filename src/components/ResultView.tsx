@@ -46,7 +46,7 @@ export function ResultView({ insight, onNewAnalysis }: ResultViewProps) {
           {
             id: 'summary',
             label: 'Podsumowanie',
-            content: <InsightDashboard document={document} />,
+            content: <InsightDashboard insight={insight} />,
           },
           { id: 'json', label: 'JSON', content: <JsonPreview json={json} /> },
         ]}

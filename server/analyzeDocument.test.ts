@@ -22,7 +22,7 @@ function validOutput(): LlmInsight {
 
 function withSummary(summary: string): LlmInsight {
   const output = validOutput();
-  return { ...output, document: { ...output.document, summary } };
+  return { ...output, summary };
 }
 
 const CORRECTION_PREFIX = 'Your previous JSON did not match the required schema due to: ';
@@ -36,7 +36,7 @@ describe('analyzeDocument', () => {
 
     expect(insight.document.fileName).toBe('faktura.pdf');
     expect(insight.document.pages).toBe(2);
-    expect(insight.type).toBe('faktura');
+    expect(insight.document.type).toBe('faktura');
     expect(fake.sentMessages).toHaveLength(1);
   });
 
@@ -72,7 +72,7 @@ describe('analyzeDocument', () => {
     expect(correction.startsWith(CORRECTION_PREFIX)).toBe(true);
     expect(correction.endsWith(CORRECTION_SUFFIX)).toBe(true);
     expect(correction).toContain('Summary must have 3-5 sentences');
-    expect(correction).toContain('document.summary');
+    expect(correction).toContain('at summary');
   });
 
   it('retries once when the reply is not valid JSON', async () => {

@@ -3,31 +3,37 @@ import { documentInsightSchema, documentTypeSchema, type DocumentInsight } from 
 
 function createValidInsight(): DocumentInsight {
   return {
-    type: 'faktura',
     document: {
       fileName: 'faktura-03-2024.pdf',
       pages: 2,
       language: 'pl',
+      type: 'faktura',
       title: 'Faktura VAT nr FV/03/2024',
       date: '2024-03-15',
-      summary:
-        'Faktura VAT wystawiona przez ABC Sp. z o.o. dla XYZ S.A. Dotyczy usług hostingu za marzec 2024 r. Kwota do zapłaty wynosi 1 230,00 zł brutto.',
-      keyPoints: [
-        'Sprzedawca: ABC Sp. z o.o.',
-        'Nabywca: XYZ S.A.',
-        'Termin płatności: 29 marca 2024 r.',
-      ],
-      entities: {
-        organizations: ['ABC Sp. z o.o.', 'XYZ S.A.'],
-        people: ['Jan Kowalski'],
-      },
-      amounts: [{ value: 1230, currency: 'PLN', context: 'Kwota brutto do zapłaty' }],
-      dates: [{ date: '2024-03-29', context: 'Termin płatności' }],
-      keywords: ['faktura', 'hosting', 'VAT'],
     },
+    summary:
+      'Faktura VAT wystawiona przez ABC Sp. z o.o. dla XYZ S.A. Dotyczy usług hostingu za marzec 2024 r. Kwota do zapłaty wynosi 1 230,00 zł brutto.',
+    keyPoints: [
+      'Sprzedawca: ABC Sp. z o.o.',
+      'Nabywca: XYZ S.A.',
+      'Termin płatności: 29 marca 2024 r.',
+    ],
+    entities: {
+      organizations: ['ABC Sp. z o.o.', 'XYZ S.A.'],
+      people: ['Jan Kowalski'],
+    },
+    amounts: [{ value: 1230, currency: 'PLN', context: 'Kwota brutto do zapłaty' }],
+    dates: [{ date: '2024-03-29', context: 'Termin płatności' }],
+    keywords: ['faktura', 'hosting', 'VAT'],
   };
 }
 
+/** Overrides top-level analysis fields such as `summary` or `amounts`. */
+function withFields(overrides: Record<string, unknown>): unknown {
+  return { ...createValidInsight(), ...overrides };
+}
+
+/** Overrides fields of the `document` metadata. */
 function withDocument(overrides: Record<string, unknown>): unknown {
   const insight = createValidInsight();
   return { ...insight, document: { ...insight.document, ...overrides } };
@@ -70,45 +76,46 @@ describe('documentInsightSchema', () => {
     });
 
     it('accepts null and empty lists when information is missing', () => {
-      const payload = withDocument({
-        title: null,
-        date: null,
+      const insight = createValidInsight();
+      const payload = {
+        ...insight,
+        document: { ...insight.document, title: null, date: null },
         entities: { organizations: [], people: [] },
         amounts: [],
         dates: [],
         keywords: [],
-      });
+      };
 
       expect(documentInsightSchema.safeParse(payload).success).toBe(true);
     });
 
     it('accepts a raw JSON response from the LLM backend', () => {
       const rawJson = `{
-        "type": "umowa",
         "document": {
           "fileName": "umowa.pdf",
           "pages": 5,
           "language": "pl",
+          "type": "umowa",
           "title": null,
-          "date": null,
-          "summary": "Umowa najmu lokalu użytkowego. Czynsz wynosi 4 000 zł miesięcznie. Umowa jest zawarta na czas nieokreślony.",
-          "keyPoints": ["Najem lokalu", "Czynsz miesięczny", "Czas nieokreślony"],
-          "entities": { "organizations": [], "people": ["Anna Nowak"] },
-          "amounts": [{ "value": 4000, "currency": "PLN", "context": "Czynsz miesięczny" }],
-          "dates": [],
-          "keywords": ["najem", "czynsz"]
-        }
+          "date": null
+        },
+        "summary": "Umowa najmu lokalu użytkowego. Czynsz wynosi 4 000 zł miesięcznie. Umowa jest zawarta na czas nieokreślony.",
+        "keyPoints": ["Najem lokalu", "Czynsz miesięczny", "Czas nieokreślony"],
+        "entities": { "organizations": [], "people": ["Anna Nowak"] },
+        "amounts": [{ "value": 4000, "currency": "PLN", "context": "Czynsz miesięczny" }],
+        "dates": [],
+        "keywords": ["najem", "czynsz"]
       }`;
 
       expect(documentInsightSchema.safeParse(JSON.parse(rawJson)).success).toBe(true);
     });
 
     it.each(documentTypeSchema.options)('accepts document type %j', (type) => {
-      expect(documentInsightSchema.safeParse({ ...createValidInsight(), type }).success).toBe(true);
+      expect(documentInsightSchema.safeParse(withDocument({ type })).success).toBe(true);
     });
 
     it('accepts the upper limits of summary sentences and key points', () => {
-      const payload = withDocument({
+      const payload = withFields({
         summary: fiveSentences,
         keyPoints: ['1', '2', '3', '4', '5', '6', '7'],
       });
@@ -117,10 +124,12 @@ describe('documentInsightSchema', () => {
     });
 
     it('accepts a negative amount and a leap day', () => {
-      const payload = withDocument({
-        date: '2024-02-29',
+      const insight = createValidInsight();
+      const payload = {
+        ...insight,
+        document: { ...insight.document, date: '2024-02-29' },
         amounts: [{ value: -150.5, currency: 'EUR', context: 'Korekta faktury' }],
-      });
+      };
 
       expect(documentInsightSchema.safeParse(payload).success).toBe(true);
     });
@@ -136,8 +145,8 @@ describe('documentInsightSchema', () => {
     const insight = createValidInsight();
 
     it.each<[string, unknown, readonly PropertyKey[]]>([
-      ['unknown document type', { ...insight, type: 'umowa-zlecenie' }, ['type']],
-      ['missing type', omitKey(insight, 'type'), ['type']],
+      ['unknown document type', withDocument({ type: 'umowa-zlecenie' }), ['document', 'type']],
+      ['missing type', withoutDocumentKey('type'), ['document', 'type']],
       ['missing document', omitKey(insight, 'document'), ['document']],
       ['unknown top-level key', { ...insight, confidence: 0.9 }, []],
       ['unknown document key', withDocument({ confidence: 0.9 }), ['document']],
@@ -155,83 +164,67 @@ describe('documentInsightSchema', () => {
       ['non-ISO date', withDocument({ date: '15.03.2024' }), ['document', 'date']],
       ['datetime', withDocument({ date: '2024-03-15T10:00:00Z' }), ['document', 'date']],
       ['missing date', withoutDocumentKey('date'), ['document', 'date']],
-      ['empty summary', withDocument({ summary: '' }), ['document', 'summary']],
-      [
-        'summary below 3 sentences',
-        withDocument({ summary: twoSentences }),
-        ['document', 'summary'],
-      ],
-      [
-        'summary above 5 sentences',
-        withDocument({ summary: sixSentences }),
-        ['document', 'summary'],
-      ],
-      ['empty key points', withDocument({ keyPoints: [] }), ['document', 'keyPoints']],
-      ['2 key points', withDocument({ keyPoints: ['1', '2'] }), ['document', 'keyPoints']],
+      ['empty summary', withFields({ summary: '' }), ['summary']],
+      ['summary below 3 sentences', withFields({ summary: twoSentences }), ['summary']],
+      ['summary above 5 sentences', withFields({ summary: sixSentences }), ['summary']],
+      ['empty key points', withFields({ keyPoints: [] }), ['keyPoints']],
+      ['2 key points', withFields({ keyPoints: ['1', '2'] }), ['keyPoints']],
       [
         '8 key points',
-        withDocument({ keyPoints: ['1', '2', '3', '4', '5', '6', '7', '8'] }),
-        ['document', 'keyPoints'],
+        withFields({ keyPoints: ['1', '2', '3', '4', '5', '6', '7', '8'] }),
+        ['keyPoints'],
       ],
-      [
-        'blank key point',
-        withDocument({ keyPoints: ['1', ' ', '3'] }),
-        ['document', 'keyPoints', 1],
-      ],
-      [
-        'missing people',
-        withDocument({ entities: { organizations: [] } }),
-        ['document', 'entities', 'people'],
-      ],
+      ['blank key point', withFields({ keyPoints: ['1', ' ', '3'] }), ['keyPoints', 1]],
+      ['missing people', withFields({ entities: { organizations: [] } }), ['entities', 'people']],
       [
         'null organizations',
-        withDocument({ entities: { organizations: null, people: [] } }),
-        ['document', 'entities', 'organizations'],
+        withFields({ entities: { organizations: null, people: [] } }),
+        ['entities', 'organizations'],
       ],
       [
         'empty person name',
-        withDocument({ entities: { organizations: [], people: [''] } }),
-        ['document', 'entities', 'people', 0],
+        withFields({ entities: { organizations: [], people: [''] } }),
+        ['entities', 'people', 0],
       ],
-      ['null amounts', withDocument({ amounts: null }), ['document', 'amounts']],
+      ['null amounts', withFields({ amounts: null }), ['amounts']],
       [
         'amount value as a string',
-        withDocument({ amounts: [{ value: '1500', currency: 'PLN', context: 'Cena' }] }),
-        ['document', 'amounts', 0, 'value'],
+        withFields({ amounts: [{ value: '1500', currency: 'PLN', context: 'Cena' }] }),
+        ['amounts', 0, 'value'],
       ],
       [
         'currency symbol',
-        withDocument({ amounts: [{ value: 1500, currency: 'zł', context: 'Cena' }] }),
-        ['document', 'amounts', 0, 'currency'],
+        withFields({ amounts: [{ value: 1500, currency: 'zł', context: 'Cena' }] }),
+        ['amounts', 0, 'currency'],
       ],
       [
         'lowercase currency',
-        withDocument({ amounts: [{ value: 1500, currency: 'pln', context: 'Cena' }] }),
-        ['document', 'amounts', 0, 'currency'],
+        withFields({ amounts: [{ value: 1500, currency: 'pln', context: 'Cena' }] }),
+        ['amounts', 0, 'currency'],
       ],
       [
         'missing amount context',
-        withDocument({ amounts: [{ value: 1500, currency: 'PLN' }] }),
-        ['document', 'amounts', 0, 'context'],
+        withFields({ amounts: [{ value: 1500, currency: 'PLN' }] }),
+        ['amounts', 0, 'context'],
       ],
       [
         'unknown amount key',
-        withDocument({ amounts: [{ value: 1500, currency: 'PLN', context: 'Cena', vat: 23 }] }),
-        ['document', 'amounts', 0],
+        withFields({ amounts: [{ value: 1500, currency: 'PLN', context: 'Cena', vat: 23 }] }),
+        ['amounts', 0],
       ],
       [
         'non-ISO date mention',
-        withDocument({ dates: [{ date: '29.03.2024', context: 'Termin płatności' }] }),
-        ['document', 'dates', 0, 'date'],
+        withFields({ dates: [{ date: '29.03.2024', context: 'Termin płatności' }] }),
+        ['dates', 0, 'date'],
       ],
       [
         'empty date context',
-        withDocument({ dates: [{ date: '2024-03-29', context: '' }] }),
-        ['document', 'dates', 0, 'context'],
+        withFields({ dates: [{ date: '2024-03-29', context: '' }] }),
+        ['dates', 0, 'context'],
       ],
-      ['null keywords', withDocument({ keywords: null }), ['document', 'keywords']],
-      ['missing keywords', withoutDocumentKey('keywords'), ['document', 'keywords']],
-      ['empty keyword', withDocument({ keywords: [''] }), ['document', 'keywords', 0]],
+      ['null keywords', withFields({ keywords: null }), ['keywords']],
+      ['missing keywords', omitKey(insight, 'keywords'), ['keywords']],
+      ['empty keyword', withFields({ keywords: [''] }), ['keywords', 0]],
     ])('rejects %s', (_case, payload, path) => {
       expectInvalidAt(payload, path);
     });

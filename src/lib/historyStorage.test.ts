@@ -3,7 +3,7 @@ import { createInsight } from '../test/insightFixture.ts';
 import { createMemoryStorage, type KeyValueStorage } from './browserStorage.ts';
 import { createHistoryStore, HISTORY_LIMIT } from './historyStorage.ts';
 
-const STORAGE_KEY = 'pdf-insight:history:v1';
+const STORAGE_KEY = 'pdf-insight:history:v2';
 
 function createStore(storage: KeyValueStorage = createMemoryStorage()) {
   let counter = 0;
