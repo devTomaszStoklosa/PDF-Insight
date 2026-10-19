@@ -4,35 +4,55 @@ import { HttpError, type ApiErrorBody } from './errors.ts';
 import { handleRequest, type RequestDependencies } from './handleRequest.ts';
 import { LlmError, type LlmReply } from './llmClient.ts';
 import { FEW_SHOT_EXAMPLES } from './prompt.ts';
+import { clientIdOf, type RateLimitDecision, type RateLimiter } from './rateLimit.ts';
 import { createFakeLlmClient, textReply } from './test/fakeLlmClient.ts';
 
 const ALLOWED_ORIGIN = 'https://devtomaszstoklosa.github.io';
 const ENDPOINT = 'https://pdf-insight.example.test/api/analyze';
 const DOCUMENT_TEXT = 'Poufna treść faktury nr 7/2024.';
+const CLIENT_IP = '203.0.113.7';
 
 const config: ServerConfig = {
   llmApiKey: 'test-key-secret',
   llmModel: 'gemini-test',
   allowedOrigins: new Set([ALLOWED_ORIGIN]),
+  rateLimitStore: { url: 'https://example-db.upstash.io', token: 'store-token-secret' },
 };
 
 const validOutput = FEW_SHOT_EXAMPLES[0]?.output;
 
-function setup(replies: readonly (LlmReply | Error)[] = [textReply(validOutput)]) {
+/** Records the client IDs it is asked about and answers with a fixed decision or error. */
+function fakeRateLimiter(decision: RateLimitDecision | Error) {
+  const checkedIds: string[] = [];
+  const limiter: RateLimiter = {
+    check(clientId) {
+      checkedIds.push(clientId);
+      return decision instanceof Error ? Promise.reject(decision) : Promise.resolve(decision);
+    },
+  };
+  return { limiter, checkedIds };
+}
+
+function setup(
+  replies: readonly (LlmReply | Error)[] = [textReply(validOutput)],
+  rateLimit: RateLimitDecision | Error = { allowed: true },
+) {
   const llm = createFakeLlmClient(replies);
+  const rateLimiter = fakeRateLimiter(rateLimit);
   const logError = vi.fn<RequestDependencies['logError']>();
   const dependencies: RequestDependencies = {
     loadConfig: () => config,
     createLlmClient: () => llm.client,
+    createRateLimiter: () => rateLimiter.limiter,
     logError,
   };
-  return { llm, logError, dependencies };
+  return { llm, rateLimiter, logError, dependencies };
 }
 
 function analyzeRequest(
   options: { origin?: string | null; method?: string; body?: unknown } = {},
 ): Request {
-  const headers = new Headers({ 'Content-Type': 'application/json' });
+  const headers = new Headers({ 'Content-Type': 'application/json', 'X-Real-IP': CLIENT_IP });
   const origin = options.origin === undefined ? ALLOWED_ORIGIN : options.origin;
   if (origin !== null) {
     headers.set('Origin', origin);
@@ -95,6 +115,56 @@ describe('handleRequest', () => {
     expect(response.headers.get('Vary')).toBe('Origin');
     expect((await errorBody(response)).error.code).toBe('ORIGIN_NOT_ALLOWED');
     expect(llm.sentMessages).toHaveLength(0);
+  });
+
+  it('returns 429 with Retry-After when the client is over the limit', async () => {
+    const { dependencies, llm, logError } = setup(undefined, {
+      allowed: false,
+      retryAfterSeconds: 42,
+    });
+    const request = analyzeRequest();
+
+    const response = await handleRequest(request, dependencies);
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get('Retry-After')).toBe('42');
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe(ALLOWED_ORIGIN);
+    expect(await errorBody(response)).toEqual({
+      error: {
+        code: 'RATE_LIMITED',
+        message: 'Wykonano zbyt wiele analiz w krótkim czasie. Spróbuj ponownie później.',
+      },
+    });
+    expect(request.bodyUsed).toBe(false);
+    expect(llm.sentMessages).toHaveLength(0);
+    expect(logError).toHaveBeenCalledWith({ code: 'RATE_LIMITED' });
+  });
+
+  it('checks the limit for a hash of the client address, not the address itself', async () => {
+    const { dependencies, rateLimiter } = setup();
+    const request = analyzeRequest();
+
+    await handleRequest(request, dependencies);
+
+    expect(rateLimiter.checkedIds).toEqual([clientIdOf(request.headers)]);
+    expect(rateLimiter.checkedIds[0]).not.toContain(CLIENT_IP);
+  });
+
+  it('does not limit the CORS preflight', async () => {
+    const { dependencies, rateLimiter } = setup();
+
+    await handleRequest(analyzeRequest({ method: 'OPTIONS' }), dependencies);
+
+    expect(rateLimiter.checkedIds).toHaveLength(0);
+  });
+
+  it('lets the analysis through and logs it when the limit store fails', async () => {
+    const { dependencies, logError } = setup(undefined, new Error('store unreachable'));
+
+    const response = await handleRequest(analyzeRequest(), dependencies);
+
+    expect(response.status).toBe(200);
+    expect(logError).toHaveBeenCalledWith({ code: 'RATE_LIMIT_UNAVAILABLE' });
   });
 
   it('rejects other methods', async () => {
