@@ -4,6 +4,7 @@ export type ApiErrorCode =
   | 'UNSUPPORTED_MEDIA_TYPE'
   | 'PAYLOAD_TOO_LARGE'
   | 'INVALID_REQUEST'
+  | 'RATE_LIMITED'
   | 'LLM_INVALID_OUTPUT'
   | 'LLM_QUOTA_EXCEEDED'
   | 'LLM_UNAVAILABLE'
@@ -38,6 +39,10 @@ const API_ERRORS: Readonly<Record<ApiErrorCode, ApiErrorDefinition>> = {
     status: 400,
     message:
       'Nieprawidłowe dane wejściowe. Wymagane pola: fileName, pages i text z tekstem dokumentu.',
+  },
+  RATE_LIMITED: {
+    status: 429,
+    message: 'Wykonano zbyt wiele analiz w krótkim czasie. Spróbuj ponownie później.',
   },
   // 502: the request was valid, but the upstream model did not return a usable analysis.
   LLM_INVALID_OUTPUT: {
