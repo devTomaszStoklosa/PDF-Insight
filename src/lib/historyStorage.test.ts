@@ -3,7 +3,7 @@ import { createInsight } from '../test/insightFixture.ts';
 import { createMemoryStorage, type KeyValueStorage } from './browserStorage.ts';
 import { createHistoryStore, HISTORY_LIMIT } from './historyStorage.ts';
 
-const STORAGE_KEY = 'pdf-insight:history:v1';
+const STORAGE_KEY = 'pdf-insight:history:v2';
 
 function createStore(storage: KeyValueStorage = createMemoryStorage()) {
   let counter = 0;
@@ -79,6 +79,19 @@ describe('createHistoryStore', () => {
     storage.setItem(STORAGE_KEY, JSON.stringify([{ id: 'broken' }, valid]));
 
     expect(createStore(storage).load()).toEqual([valid]);
+  });
+
+  it('ignores entries saved by the version with the previous result layout', () => {
+    const storage = createMemoryStorage();
+    const { document, ...analysis } = createInsight();
+    const previousEntry = {
+      id: 'old',
+      savedAt: '2026-10-19T12:00:00.000Z',
+      insight: { type: document.type, document: { ...document, ...analysis } },
+    };
+    storage.setItem('pdf-insight:history:v1', JSON.stringify([previousEntry]));
+
+    expect(createStore(storage).load()).toEqual([]);
   });
 
   it('ignores stored data that is not valid JSON', () => {

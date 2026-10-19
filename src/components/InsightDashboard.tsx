@@ -1,14 +1,14 @@
 import { formatAmount, formatCalendarDate } from '../lib/formatters.ts';
-import type { DocumentDetails } from '../types/schema.ts';
+import type { DocumentInsight } from '../types/schema.ts';
 import { InsightSection } from './InsightSection.tsx';
 
 interface InsightDashboardProps {
-  readonly document: DocumentDetails;
+  readonly insight: DocumentInsight;
 }
 
 /** The analysis as readable cards. All values are untrusted AI output rendered as plain text. */
-export function InsightDashboard({ document }: InsightDashboardProps) {
-  const { entities } = document;
+export function InsightDashboard({ insight }: InsightDashboardProps) {
+  const { entities } = insight;
 
   return (
     <div className="dashboard">
@@ -18,17 +18,17 @@ export function InsightDashboard({ document }: InsightDashboardProps) {
         isEmpty={false}
         className="insight--summary"
       >
-        <p className="summary">{document.summary}</p>
+        <p className="summary">{insight.summary}</p>
       </InsightSection>
 
       <InsightSection
         title="Najważniejsze punkty"
         emptyMessage="Brak najważniejszych punktów."
-        isEmpty={document.keyPoints.length === 0}
+        isEmpty={insight.keyPoints.length === 0}
         className="insight--wide"
       >
         <ul className="key-points">
-          {document.keyPoints.map((point, index) => (
+          {insight.keyPoints.map((point, index) => (
             <li key={index}>{point}</li>
           ))}
         </ul>
@@ -37,10 +37,10 @@ export function InsightDashboard({ document }: InsightDashboardProps) {
       <InsightSection
         title="Kwoty"
         emptyMessage="W dokumencie nie znaleziono kwot."
-        isEmpty={document.amounts.length === 0}
+        isEmpty={insight.amounts.length === 0}
       >
         <ul className="facts">
-          {document.amounts.map((amount, index) => (
+          {insight.amounts.map((amount, index) => (
             <li key={index} className="fact">
               <span className="fact__value">{formatAmount(amount.value, amount.currency)}</span>
               <span className="fact__context">{amount.context}</span>
@@ -52,10 +52,10 @@ export function InsightDashboard({ document }: InsightDashboardProps) {
       <InsightSection
         title="Daty"
         emptyMessage="W dokumencie nie znaleziono dat."
-        isEmpty={document.dates.length === 0}
+        isEmpty={insight.dates.length === 0}
       >
         <ul className="facts">
-          {document.dates.map((mention, index) => (
+          {insight.dates.map((mention, index) => (
             <li key={index} className="fact">
               <time className="fact__value" dateTime={mention.date}>
                 {formatCalendarDate(mention.date)}
@@ -69,10 +69,10 @@ export function InsightDashboard({ document }: InsightDashboardProps) {
       <InsightSection
         title="Słowa kluczowe"
         emptyMessage="Brak słów kluczowych."
-        isEmpty={document.keywords.length === 0}
+        isEmpty={insight.keywords.length === 0}
       >
         <ul className="chips">
-          {document.keywords.map((keyword, index) => (
+          {insight.keywords.map((keyword, index) => (
             <li key={index} className="chip">
               {keyword}
             </li>

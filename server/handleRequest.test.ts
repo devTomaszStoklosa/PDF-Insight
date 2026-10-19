@@ -65,8 +65,7 @@ describe('handleRequest', () => {
     expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff');
     expect(response.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
     await expect(response.json()).resolves.toMatchObject({
-      type: 'faktura',
-      document: { fileName: 'f.pdf', pages: 1 },
+      document: { fileName: 'f.pdf', pages: 1, type: 'faktura' },
     });
   });
 

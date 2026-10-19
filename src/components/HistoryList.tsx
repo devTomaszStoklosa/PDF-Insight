@@ -33,7 +33,7 @@ export function HistoryList({ entries, activeInsight, onSelect, onClear }: Histo
               >
                 <span className="history__name">{document.title ?? document.fileName}</span>
                 <span className="history__meta">
-                  {DOCUMENT_TYPE_LABELS[entry.insight.type]} ·{' '}
+                  {DOCUMENT_TYPE_LABELS[document.type]} ·{' '}
                   <time dateTime={entry.savedAt}>{formatTimestamp(entry.savedAt)}</time>
                 </span>
               </button>

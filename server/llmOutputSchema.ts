@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { documentDetailsSchema, documentTypeSchema } from '../src/types/schema.ts';
+import { documentInsightSchema, documentMetadataSchema } from '../src/types/schema.ts';
 import type { JsonSchema } from './llmClient.ts';
 
 /**
@@ -7,8 +7,8 @@ import type { JsonSchema } from './llmClient.ts';
  * the request, so the model cannot get them wrong; the server adds them afterwards.
  */
 export const llmInsightSchema = z.strictObject({
-  type: documentTypeSchema,
-  document: documentDetailsSchema.omit({ fileName: true, pages: true }),
+  ...documentInsightSchema.shape,
+  document: documentMetadataSchema.omit({ fileName: true, pages: true }),
 });
 
 export type LlmInsight = z.infer<typeof llmInsightSchema>;

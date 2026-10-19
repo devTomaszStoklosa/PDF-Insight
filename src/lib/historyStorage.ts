@@ -4,7 +4,7 @@ import type { KeyValueStorage } from './browserStorage.ts';
 
 export const HISTORY_LIMIT = 3;
 // Bump the version when the entry shape changes; old entries then simply stop loading.
-const STORAGE_KEY = 'pdf-insight:history:v1';
+const STORAGE_KEY = 'pdf-insight:history:v2';
 
 const historyEntrySchema = z.strictObject({
   id: z.string().min(1),

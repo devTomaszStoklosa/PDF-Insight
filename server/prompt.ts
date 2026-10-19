@@ -53,34 +53,34 @@ export const FEW_SHOT_EXAMPLES: readonly FewShotExample[] = [
       ].join('\n'),
     },
     output: {
-      type: 'faktura',
       document: {
         language: 'pl',
+        type: 'faktura',
         title: 'Faktura VAT nr FV/2024/03/118',
         date: '2024-03-15',
-        summary:
-          'Faktura VAT wystawiona przez Hostico Sp. z o.o. dla Nowak Consulting S.A. Dotyczy usługi hostingu serwera VPS za marzec 2024 r. Kwota do zapłaty wynosi 1230,00 PLN brutto, a termin płatności mija 29 marca 2024 r.',
-        keyPoints: [
-          'Sprzedawca: Hostico Sp. z o.o.',
-          'Nabywca: Nowak Consulting S.A.',
-          'Wartość netto 1000,00 PLN, VAT 23% w kwocie 230,00 PLN',
-          'Termin płatności: 29 marca 2024 r.',
-        ],
-        entities: {
-          organizations: ['Hostico Sp. z o.o.', 'Nowak Consulting S.A.'],
-          people: ['Jan Kowalski'],
-        },
-        amounts: [
-          { value: 1000, currency: 'PLN', context: 'Wartość netto usługi' },
-          { value: 230, currency: 'PLN', context: 'Podatek VAT 23%' },
-          { value: 1230, currency: 'PLN', context: 'Kwota brutto do zapłaty' },
-        ],
-        dates: [
-          { date: '2024-03-15', context: 'Data wystawienia faktury' },
-          { date: '2024-03-29', context: 'Termin płatności' },
-        ],
-        keywords: ['faktura', 'hosting', 'VPS', 'VAT'],
       },
+      summary:
+        'Faktura VAT wystawiona przez Hostico Sp. z o.o. dla Nowak Consulting S.A. Dotyczy usługi hostingu serwera VPS za marzec 2024 r. Kwota do zapłaty wynosi 1230,00 PLN brutto, a termin płatności mija 29 marca 2024 r.',
+      keyPoints: [
+        'Sprzedawca: Hostico Sp. z o.o.',
+        'Nabywca: Nowak Consulting S.A.',
+        'Wartość netto 1000,00 PLN, VAT 23% w kwocie 230,00 PLN',
+        'Termin płatności: 29 marca 2024 r.',
+      ],
+      entities: {
+        organizations: ['Hostico Sp. z o.o.', 'Nowak Consulting S.A.'],
+        people: ['Jan Kowalski'],
+      },
+      amounts: [
+        { value: 1000, currency: 'PLN', context: 'Wartość netto usługi' },
+        { value: 230, currency: 'PLN', context: 'Podatek VAT 23%' },
+        { value: 1230, currency: 'PLN', context: 'Kwota brutto do zapłaty' },
+      ],
+      dates: [
+        { date: '2024-03-15', context: 'Data wystawienia faktury' },
+        { date: '2024-03-29', context: 'Termin płatności' },
+      ],
+      keywords: ['faktura', 'hosting', 'VPS', 'VAT'],
     },
   },
   {
@@ -95,23 +95,23 @@ export const FEW_SHOT_EXAMPLES: readonly FewShotExample[] = [
       ].join('\n'),
     },
     output: {
-      type: 'inne',
       document: {
         language: 'en',
+        type: 'inne',
         title: null,
         date: null,
-        summary:
-          'Notatka opisuje dyskusję zespołu o przeniesieniu usługi raportowej do nowego środowiska chmurowego. Otwarte pozostają kwestie okresu przechowywania danych oraz dostępu dla audytorów zewnętrznych. Kolejne kroki mają zostać ustalone na następnym spotkaniu.',
-        keyPoints: [
-          'Migracja usługi raportowej do nowego środowiska chmurowego',
-          'Otwarta kwestia: okres przechowywania danych',
-          'Otwarta kwestia: dostęp dla audytorów zewnętrznych',
-        ],
-        entities: { organizations: [], people: [] },
-        amounts: [],
-        dates: [],
-        keywords: ['migracja', 'chmura', 'raportowanie', 'audyt'],
       },
+      summary:
+        'Notatka opisuje dyskusję zespołu o przeniesieniu usługi raportowej do nowego środowiska chmurowego. Otwarte pozostają kwestie okresu przechowywania danych oraz dostępu dla audytorów zewnętrznych. Kolejne kroki mają zostać ustalone na następnym spotkaniu.',
+      keyPoints: [
+        'Migracja usługi raportowej do nowego środowiska chmurowego',
+        'Otwarta kwestia: okres przechowywania danych',
+        'Otwarta kwestia: dostęp dla audytorów zewnętrznych',
+      ],
+      entities: { organizations: [], people: [] },
+      amounts: [],
+      dates: [],
+      keywords: ['migracja', 'chmura', 'raportowanie', 'audyt'],
     },
   },
 ];
@@ -138,16 +138,16 @@ The user message contains document metadata in <metadata> and the text extracted
 Return only one JSON object that matches the response schema: no markdown, no code fences, no comments, no text before or after the JSON, and no keys outside the schema. Every key is required: use null or [] when the information is missing.
 
 # Fields
-- type: "umowa" (contract or agreement), "faktura" (invoice, including a correction invoice), "oferta" (offer or quotation), "raport" (report or financial statement) or "inne" (anything else).
 - document.language: ISO 639-1 code of the document's main language, in lowercase, e.g. "pl", "en", "de".
+- document.type: "umowa" (contract or agreement), "faktura" (invoice, including a correction invoice), "oferta" (offer or quotation), "raport" (report or financial statement) or "inne" (anything else).
 - document.title: the title exactly as written in the document; null if the document has no explicit title. Never make one up.
 - document.date: the main date of the document (issue, signing or report date) as YYYY-MM-DD; null if it is not stated.
-- document.summary: 3 to 5 complete sentences that say what the document is and state its most important facts.
-- document.keyPoints: 3 to 7 short points with the most important facts, such as parties, obligations, amounts and deadlines.
-- document.entities.organizations and document.entities.people: names exactly as written; [] if there are none.
-- document.amounts: monetary amounts that matter for the document. "value" is a JSON number with a dot as the decimal separator and no thousands separators ("1 230,50 zł" becomes 1230.5; negative for corrections). "currency" is the ISO 4217 code in uppercase ("zł" becomes "PLN", "€" becomes "EUR"). Skip an amount if the document does not make its currency clear. "context" says what the amount is.
-- document.dates: important dates such as deadlines, periods and signing dates, as YYYY-MM-DD, each with a "context". Include only dates with a known day, month and year.
-- document.keywords: 3 to 10 keywords describing the topic.
+- summary: 3 to 5 complete sentences that say what the document is and state its most important facts.
+- keyPoints: 3 to 7 short points with the most important facts, such as parties, obligations, amounts and deadlines.
+- entities.organizations and entities.people: names exactly as written; [] if there are none.
+- amounts: monetary amounts that matter for the document. "value" is a JSON number with a dot as the decimal separator and no thousands separators ("1 230,50 zł" becomes 1230.5; negative for corrections). "currency" is the ISO 4217 code in uppercase ("zł" becomes "PLN", "€" becomes "EUR"). Skip an amount if the document does not make its currency clear. "context" says what the amount is.
+- dates: important dates such as deadlines, periods and signing dates, as YYYY-MM-DD, each with a "context". Include only dates with a known day, month and year.
+- keywords: 3 to 10 keywords describing the topic.
 
 # Accuracy
 - Use only information stated in the document. Do not guess, do not infer missing values and do not add outside knowledge.
