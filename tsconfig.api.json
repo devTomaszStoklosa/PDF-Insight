@@ -23,5 +23,5 @@
     "noUnusedParameters": true,
     "erasableSyntaxOnly": true
   },
-  "include": ["api", "server"]
+  "include": ["api", "server", "scripts"]
 }
