@@ -102,16 +102,16 @@ export const FEW_SHOT_EXAMPLES: readonly FewShotExample[] = [
         date: null,
       },
       summary:
-        'Notatka opisuje dyskusję zespołu o przeniesieniu usługi raportowej do nowego środowiska chmurowego. Otwarte pozostają kwestie okresu przechowywania danych oraz dostępu dla audytorów zewnętrznych. Kolejne kroki mają zostać ustalone na następnym spotkaniu.',
+        'The note describes a team discussion about moving the reporting service to a new cloud environment. The data retention period and access for external auditors remain open questions. Next steps will be agreed at the next meeting.',
       keyPoints: [
-        'Migracja usługi raportowej do nowego środowiska chmurowego',
-        'Otwarta kwestia: okres przechowywania danych',
-        'Otwarta kwestia: dostęp dla audytorów zewnętrznych',
+        'Migration of the reporting service to a new cloud environment',
+        'Open question: data retention period',
+        'Open question: access for external auditors',
       ],
       entities: { organizations: [], people: [] },
       amounts: [],
       dates: [],
-      keywords: ['migracja', 'chmura', 'raportowanie', 'audyt'],
+      keywords: ['migration', 'cloud', 'reporting', 'audit'],
     },
   },
 ];
@@ -153,7 +153,7 @@ Return only one JSON object that matches the response schema: no markdown, no co
 - Use only information stated in the document. Do not guess, do not infer missing values and do not add outside knowledge.
 - If a value is missing, unclear or illegible, use null for title and date, and leave it out of lists.
 - Copy names, numbers and identifiers exactly. Convert only formats: dates, amounts and currency codes, as described above.
-- Write all descriptive text (summary, keyPoints, every "context", keywords) in Polish, even when the document is in another language.
+- Write all descriptive text (summary, keyPoints, every "context", keywords) in the document's main language, the one reported in document.language. Do not translate.
 
 # Examples
 The examples show the expected format and behavior only. Never copy their values into an analysis.`;
