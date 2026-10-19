@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { MAX_TEXT_CHARS } from '../src/types/analyzeLimits.ts';
 import type { ApiErrorCode } from './errors.ts';
-import {
-  MAX_BODY_BYTES,
-  MAX_TEXT_CHARS,
-  parseAnalyzeRequest,
-  sanitizeText,
-} from './requestBody.ts';
+import { MAX_BODY_BYTES, parseAnalyzeRequest, sanitizeText } from './requestBody.ts';
 
 const ENDPOINT = 'https://api.example.test/api/analyze';
 

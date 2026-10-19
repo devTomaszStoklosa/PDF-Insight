@@ -1,4 +1,4 @@
-import { analyzeDocument, InvalidLlmOutputError } from './analyzeDocument.ts';
+import { analyzeDocument } from './analyzeDocument.ts';
 import type { ServerConfig } from './config.ts';
 import { corsHeaders, isOriginAllowed, preflightHeaders, VARY_ORIGIN } from './cors.ts';
 import { HttpError, type ApiErrorCode } from './errors.ts';
@@ -6,6 +6,7 @@ import { emptyResponse, errorResponse, jsonResponse, type HeaderInput } from './
 import { LlmError, type LlmClient, type LlmErrorKind } from './llmClient.ts';
 import { clientIdOf, type RateLimitDecision, type RateLimiter } from './rateLimit.ts';
 import { parseAnalyzeRequest } from './requestBody.ts';
+import { InvalidLlmOutputError } from './structuredReply.ts';
 
 /**
  * What may be logged about a failure: codes only, never document content, client addresses
