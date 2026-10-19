@@ -134,6 +134,12 @@ describe('documentInsightSchema', () => {
       expect(documentInsightSchema.safeParse(payload).success).toBe(true);
     });
 
+    it.each(['CHF', 'HRK', 'CLF'])('accepts the ISO 4217 currency code %s', (currency) => {
+      const payload = withFields({ amounts: [{ value: 100, currency, context: 'Kwota' }] });
+
+      expect(documentInsightSchema.safeParse(payload).success).toBe(true);
+    });
+
     it('trims surrounding whitespace from text fields', () => {
       const result = documentInsightSchema.safeParse(withDocument({ title: '  Umowa najmu \n' }));
 
@@ -259,6 +265,16 @@ describe('documentInsightSchema', () => {
       [
         'lowercase currency',
         withFields({ amounts: [{ value: 1500, currency: 'pln', context: 'Cena' }] }),
+        ['amounts', 0, 'currency'],
+      ],
+      [
+        'made-up currency code',
+        withFields({ amounts: [{ value: 1500, currency: 'ABC', context: 'Cena' }] }),
+        ['amounts', 0, 'currency'],
+      ],
+      [
+        'the "no currency" code',
+        withFields({ amounts: [{ value: 1500, currency: 'XXX', context: 'Cena' }] }),
         ['amounts', 0, 'currency'],
       ],
       [
