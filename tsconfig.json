@@ -4,5 +4,17 @@
     { "path": "./tsconfig.app.json" },
     { "path": "./tsconfig.node.json" },
     { "path": "./tsconfig.api.json" }
-  ]
+  ],
+  // Vercel compiles api/*.ts with the nearest tsconfig.json, which is this file, not
+  // tsconfig.api.json. These options make that build emit ES modules, as "type": "module"
+  // requires, and rewrite relative ".ts" import paths to ".js". This file lists no sources,
+  // so the local builds and checks are unaffected. server/vercelBuild.test.ts repeats the build.
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "target": "es2023",
+    "strict": true,
+    "skipLibCheck": true,
+    "rewriteRelativeImportExtensions": true
+  }
 }
