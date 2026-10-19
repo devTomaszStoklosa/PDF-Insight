@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { llmInsightSchema } from './llmOutputSchema.ts';
+import { llmInsightSchema, type LlmInsight } from './llmOutputSchema.ts';
 import {
   buildCorrectionPrompt,
   buildDocumentPrompt,
@@ -7,15 +7,53 @@ import {
   SYSTEM_INSTRUCTION,
 } from './prompt.ts';
 
+// Letters that occur in Polish but not in English: a heuristic to tell the two apart.
+const POLISH_LETTERS = /[ąćęłńóśźż]/i;
+
 function countOccurrences(text: string, fragment: string): number {
   return text.split(fragment).length - 1;
 }
+
+/** The fields the model writes itself, which must be in the document's language. */
+function descriptiveText(output: LlmInsight): string {
+  return [
+    output.summary,
+    ...output.keyPoints,
+    ...output.amounts.map((amount) => amount.context),
+    ...output.dates.map((date) => date.context),
+    ...output.keywords,
+  ].join(' ');
+}
+
+describe('SYSTEM_INSTRUCTION', () => {
+  it("asks for descriptive text in the document's language, not in Polish", () => {
+    expect(SYSTEM_INSTRUCTION).not.toMatch(/in Polish/i);
+    expect(SYSTEM_INSTRUCTION).toContain(
+      "in the document's main language, the one reported in document.language",
+    );
+  });
+});
 
 describe('few-shot examples', () => {
   it.each(FEW_SHOT_EXAMPLES.map((example) => [example.input.fileName, example] as const))(
     'example %s matches the model output schema',
     (_fileName, example) => {
       expect(llmInsightSchema.safeParse(example.output).success).toBe(true);
+    },
+  );
+
+  it('show a Polish and an English document', () => {
+    expect(FEW_SHOT_EXAMPLES.map((example) => example.output.document.language)).toEqual(
+      expect.arrayContaining(['pl', 'en']),
+    );
+  });
+
+  it.each(FEW_SHOT_EXAMPLES.map((example) => [example.input.fileName, example] as const))(
+    'example %s writes its descriptive text in the document language',
+    (_fileName, example) => {
+      const isPolish = example.output.document.language === 'pl';
+
+      expect(POLISH_LETTERS.test(descriptiveText(example.output))).toBe(isPolish);
     },
   );
 
