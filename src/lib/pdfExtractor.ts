@@ -29,6 +29,17 @@ const MESSAGES = {
   unreadable: 'Nie udało się odczytać tekstu z pliku PDF. Spróbuj z innym plikiem.',
 } as const;
 
+// Where scripts/copyPdfjsAssets.ts puts the Adobe CMaps, relative to the base path.
+const CMAP_PATH = 'pdfjs/cmaps/';
+
+/**
+ * The CMap folder as an absolute URL with a trailing slash, as pdf.js requires: the worker
+ * fetches the files, and would resolve a relative path against its own location.
+ */
+function cMapUrl(): string {
+  return new URL(`${import.meta.env.BASE_URL}${CMAP_PATH}`, globalThis.location.href).href;
+}
+
 let pdfJsPromise: Promise<typeof PdfJs> | undefined;
 
 /**
@@ -86,7 +97,12 @@ export const extractPdfText: ExtractPdfText = async (file, { signal, onProgress 
   const pdfjs = await loadPdfJs();
   signal.throwIfAborted();
 
-  const loadingTask = pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) });
+  const loadingTask = pdfjs.getDocument({
+    data: new Uint8Array(await file.arrayBuffer()),
+    // CID-keyed fonts without a ToUnicode map need the predefined CMaps to yield text.
+    cMapUrl: cMapUrl(),
+    cMapPacked: true,
+  });
   const cancel = (): void => {
     void loadingTask.destroy();
   };

@@ -4,8 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "predev": "node --experimental-strip-types scripts/copyPdfjsAssets.ts",
     "dev": "vite",
     "dev:api": "node --experimental-strip-types --env-file=.env.local scripts/devApiServer.ts",
+    "prebuild": "node --experimental-strip-types scripts/copyPdfjsAssets.ts",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b",
