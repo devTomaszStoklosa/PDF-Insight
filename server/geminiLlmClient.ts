@@ -38,10 +38,37 @@ export const REQUEST_TIMEOUT_MS = 25_000;
  */
 export const ANALYSIS_BUDGET_MS = 50_000;
 
-// No transport retries: every request counts against the free-tier quota, and the
-// analyzer already makes exactly one self-correction retry.
+// No SDK retries: the SDK gives every attempt the full timeout and cannot check the analysis
+// deadline, so the session retries transient errors itself.
 function requestOptions(timeoutMs: number): GoogleGenAIRequestOptions {
   return { timeout_ms: timeoutMs, retries: { strategy: 'none' } };
+}
+
+// Server errors that the Gemini API documentation says to retry: 500 ("retry the request")
+// and 503 ("temporarily overloaded or down", "wait and retry with exponential backoff").
+const TRANSIENT_STATUSES: ReadonlySet<number> = new Set([500, 503]);
+// The wait before the one retry: 1 s, as the documentation suggests, plus up to 1 s of jitter,
+// so parts that failed together do not all retry at the same moment.
+const RETRY_DELAY_MS = { base: 1_000, jitter: 1_000 } as const;
+/**
+ * A retry is made only if this much time is left after the wait. Part-sized requests took
+ * 3.5–14 s on the free tier; with less time left, a retry would likely spend a request of the
+ * quota and end as a timeout instead of the provider's error.
+ */
+export const MIN_RETRY_TIME_MS = 15_000;
+
+function isTransient(error: unknown): error is LlmError {
+  return (
+    error instanceof LlmError &&
+    error.upstreamStatus !== undefined &&
+    TRANSIENT_STATUSES.has(error.upstreamStatus)
+  );
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 // Keywords Gemini does not document for response schemas. Zod still enforces them
@@ -117,12 +144,20 @@ function userInput(text: string): Interactions.UserInputStep {
   return { type: 'user_input', content: [{ type: 'text', text }] };
 }
 
+/** How the session paces its requests: the time left before the deadline and the retry wait. */
+interface RequestTiming {
+  readonly timeLeft: () => number;
+  readonly sleep: (ms: number) => Promise<void>;
+  /** Returns a number in [0, 1) for the retry jitter. */
+  readonly random: () => number;
+}
+
 class GeminiSession implements LlmSession {
   readonly #interactions: InteractionsApi;
   readonly #model: string;
   readonly #systemInstruction: string;
   readonly #responseSchema: JsonSchema;
-  readonly #timeoutMs: () => number;
+  readonly #timing: RequestTiming;
   // Stateless multi-turn: with `store: false` the server keeps no history, so each request
   // resends every step. Model steps are kept unchanged, including thought signatures.
   #steps: Interactions.Step[] = [];
@@ -130,27 +165,62 @@ class GeminiSession implements LlmSession {
   constructor(
     interactions: InteractionsApi,
     model: string,
-    timeoutMs: () => number,
+    timing: RequestTiming,
     options: LlmSessionOptions,
   ) {
     this.#interactions = interactions;
     this.#model = model;
-    this.#timeoutMs = timeoutMs;
+    this.#timing = timing;
     this.#systemInstruction = options.systemInstruction;
     this.#responseSchema = options.responseSchema;
   }
 
   async send(message: string): Promise<LlmReply> {
-    const timeoutMs = this.#timeoutMs();
+    const input = [...this.#steps, userInput(message)];
+    const interaction = await this.#createWithRetry(input);
+
+    this.#steps = [...input, ...interaction.steps.filter((step) => step.type !== 'user_input')];
+
+    if (interaction.status === 'incomplete') {
+      return { kind: 'truncated' };
+    }
+    if (interaction.status !== 'completed' || interaction.output_text === undefined) {
+      throw new LlmError('unavailable');
+    }
+    return { kind: 'text', text: interaction.output_text };
+  }
+
+  /**
+   * Sends the request and, after a transient server error, sends it once more if a retry can
+   * still finish before the deadline. A failed request leaves the history unchanged, so the
+   * retry sends exactly the same input.
+   */
+  async #createWithRetry(input: Interactions.Step[]): Promise<GoogleGenAIInteraction> {
+    try {
+      return await this.#create(input);
+    } catch (error) {
+      if (!isTransient(error)) {
+        throw error;
+      }
+      const delayMs = RETRY_DELAY_MS.base + this.#timing.random() * RETRY_DELAY_MS.jitter;
+      // Too little time for a retry: report the provider's error at once.
+      if (this.#timing.timeLeft() - delayMs < MIN_RETRY_TIME_MS) {
+        throw error;
+      }
+      await this.#timing.sleep(delayMs);
+      return this.#create(input);
+    }
+  }
+
+  async #create(input: Interactions.Step[]): Promise<GoogleGenAIInteraction> {
+    const timeoutMs = Math.min(REQUEST_TIMEOUT_MS, this.#timing.timeLeft());
     // The deadline has passed: fail as a timeout without spending a request of the quota.
     if (timeoutMs <= 0) {
       throw new LlmError('timeout');
     }
-    const input = [...this.#steps, userInput(message)];
 
-    let interaction: GoogleGenAIInteraction;
     try {
-      interaction = await this.#interactions.create(
+      return await this.#interactions.create(
         {
           model: this.#model,
           input,
@@ -172,16 +242,6 @@ class GeminiSession implements LlmSession {
     } catch (error) {
       throw toLlmError(error);
     }
-
-    this.#steps = [...input, ...interaction.steps.filter((step) => step.type !== 'user_input')];
-
-    if (interaction.status === 'incomplete') {
-      return { kind: 'truncated' };
-    }
-    if (interaction.status !== 'completed' || interaction.output_text === undefined) {
-      throw new LlmError('unavailable');
-    }
-    return { kind: 'text', text: interaction.output_text };
   }
 }
 
@@ -189,26 +249,35 @@ export interface GeminiClientOptions {
   /** Epoch milliseconds by which every request must end; each timeout is cut to fit. */
   readonly deadline?: number;
   readonly now?: () => number;
+  /** Waits before a retry; tests replace it so that they do not wait. */
+  readonly sleep?: (ms: number) => Promise<void>;
+  /** Returns a number in [0, 1) for the retry jitter. */
+  readonly random?: () => number;
 }
 
 /** Gemini Developer API adapter (Interactions API). */
 export class GeminiLlmClient implements LlmClient {
   readonly #interactions: InteractionsApi;
   readonly #model: string;
-  readonly #timeoutMs: () => number;
+  readonly #timing: RequestTiming;
 
   constructor(
     interactions: InteractionsApi,
     model: string,
-    { deadline = Number.POSITIVE_INFINITY, now = Date.now }: GeminiClientOptions = {},
+    {
+      deadline = Number.POSITIVE_INFINITY,
+      now = Date.now,
+      sleep = wait,
+      random = Math.random,
+    }: GeminiClientOptions = {},
   ) {
     this.#interactions = interactions;
     this.#model = model;
-    this.#timeoutMs = () => Math.min(REQUEST_TIMEOUT_MS, deadline - now());
+    this.#timing = { timeLeft: () => deadline - now(), sleep, random };
   }
 
   startSession(options: LlmSessionOptions): LlmSession {
-    return new GeminiSession(this.#interactions, this.#model, this.#timeoutMs, {
+    return new GeminiSession(this.#interactions, this.#model, this.#timing, {
       ...options,
       responseSchema: toGeminiSchema(options.responseSchema) as JsonSchema,
     });

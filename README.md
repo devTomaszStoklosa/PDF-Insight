@@ -61,7 +61,13 @@ flowchart LR
 - **Analysis in the document's language.** The summary, key points, contexts and keywords are
   written in the document's main language (`document.language`); keys stay in English.
 - **One self-correction retry.** Enough to fix a typical schema slip, while capping each
-  model call at two requests of the free quota.
+  model call at two replies to validate.
+- **One retry after a transient error (#44).** When Gemini answers 500 or 503, which its
+  documentation says to retry, the server waits 1 s plus up to 1 s of jitter and sends the
+  same request once more, but only if at least 15 s are left before the deadline; otherwise
+  the user gets the error at once. The SDK's own retries stay off, because they give every
+  attempt the full timeout. With the correction retry, one model call takes at most 4
+  requests, and only when errors occur.
 - **Long documents in parts (#24).** Text up to 37,500 characters (about 10–12 dense pages)
   takes one call. Longer text, up to 225,000 characters, is split into at most 6 parts of
   similar length, cut at page, line or word boundaries. At most 3 parts are analyzed at once:
@@ -107,12 +113,14 @@ flowchart LR
   counts it as one analysis, so two long documents in a minute can reach the free-tier quota.
   The longest documents take about 30 s, and a correction retry late in the analysis can end
   it with 504 at 50 s. Two long documents analyzed at the same time can exceed the 3 parallel
-  requests the free tier accepts and end with 503. The overview is written from the analyses
-  of the parts, not from the full text, and the same amount described differently in two
-  parts is listed twice.
+  requests the free tier accepts, and end with 503 when the retry fails too. The overview is
+  written from the analyses of the parts, not from the full text, and the same amount
+  described differently in two parts is listed twice.
 - **Scans:** there is no OCR. A PDF without a text layer ends with a message asking for one.
 - **Free-tier quota and load:** when the quota is used up, the API answers 429
-  `LLM_QUOTA_EXCEEDED`. Gemini sometimes answers 503 under load; trying again usually works.
+  `LLM_QUOTA_EXCEEDED`. Gemini sometimes answers 503 under load. The server retries once by
+  itself; when the retry fails too, or too little time is left, the user sees 503
+  `LLM_UNAVAILABLE`, and trying again later usually works.
 - **Safety blocks:** Gemini's Interactions API gives no explicit safety signal, so a blocked
   reply ends as 503 `LLM_UNAVAILABLE`, not as a dedicated error.
 - **Request limit per IP:** users behind one shared address share it.
