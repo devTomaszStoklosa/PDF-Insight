@@ -1,7 +1,14 @@
-import type { GoogleGenAIInteraction, Interactions } from '@google/genai';
+import { readFileSync } from 'node:fs';
+import type {
+  GoogleGenAIInteraction,
+  GoogleGenAIRequestOptions,
+  Interactions,
+} from '@google/genai';
 import { describe, expect, it } from 'vitest';
+import { ANALYZE_TIMEOUT_MS } from '../src/api/analyzeClient.ts';
 import {
   GeminiLlmClient,
+  REQUEST_TIMEOUT_MS,
   toGeminiSchema,
   toLlmError,
   type InteractionsApi,
@@ -34,10 +41,12 @@ const thought: Interactions.Step = { type: 'thought', signature: 'signature-1' }
 function fakeInteractions(responses: readonly (GoogleGenAIInteraction | Error)[]) {
   const queue = [...responses];
   const calls: CreateParams[] = [];
+  const requestOptions: (GoogleGenAIRequestOptions | undefined)[] = [];
   const api: InteractionsApi = {
-    create(params) {
+    create(params, options) {
       // Copy the input: the session must not mutate what it already sent.
       calls.push(structuredClone(params));
+      requestOptions.push(options);
       const response = queue.shift();
       if (response === undefined) {
         return Promise.reject(new Error('Unexpected create call'));
@@ -45,7 +54,15 @@ function fakeInteractions(responses: readonly (GoogleGenAIInteraction | Error)[]
       return response instanceof Error ? Promise.reject(response) : Promise.resolve(response);
     },
   };
-  return { api, calls };
+  return { api, calls, requestOptions };
+}
+
+/** Mirrors the SDK error for `timeout_ms` running out: no status, matched by name. */
+class FakeTimeoutError extends Error {
+  constructor() {
+    super('Request timed out.');
+    this.name = 'APIConnectionTimeoutError';
+  }
 }
 
 class FakeApiError extends Error {
@@ -134,6 +151,29 @@ describe('GeminiLlmClient', () => {
     expect(fake.calls[0]?.previous_interaction_id).toBeUndefined();
   });
 
+  it('asks for a low thinking level and limits each request to the timeout', async () => {
+    const fake = fakeInteractions([interaction('completed', [modelOutput('{}')], '{}')]);
+    const session = new GeminiLlmClient(fake.api, 'gemini-test').startSession(SESSION_OPTIONS);
+
+    await session.send('Analyze.');
+
+    expect(fake.calls[0]?.generation_config).toMatchObject({ thinking_level: 'low' });
+    expect(fake.requestOptions[0]).toEqual({
+      timeout_ms: REQUEST_TIMEOUT_MS,
+      retries: { strategy: 'none' },
+    });
+  });
+
+  it('fits two requests within the browser timeout and the function time limit', () => {
+    const vercelConfig = JSON.parse(
+      readFileSync(new URL('../vercel.json', import.meta.url), 'utf8'),
+    ) as { functions: Record<string, { maxDuration: number }> };
+    const maxDurationMs = (vercelConfig.functions['api/analyze.ts']?.maxDuration ?? 0) * 1000;
+
+    expect(2 * REQUEST_TIMEOUT_MS).toBeLessThan(ANALYZE_TIMEOUT_MS);
+    expect(2 * REQUEST_TIMEOUT_MS).toBeLessThan(maxDurationMs);
+  });
+
   it('resends the full history, model steps unchanged, on the next message', async () => {
     const fake = fakeInteractions([
       interaction('completed', [thought, modelOutput('bad')], 'bad'),
@@ -206,7 +246,8 @@ describe('toLlmError', () => {
     ['a 404', new FakeApiError(404), 'misconfigured', 404],
     ['a 400', new FakeApiError(400), 'misconfigured', 400],
     ['a 503', new FakeApiError(503), 'unavailable', 503],
-    ['a timeout without a status', new Error('timeout'), 'unavailable', undefined],
+    ['the request timeout', new FakeTimeoutError(), 'timeout', undefined],
+    ['another error without a status', new Error('connection reset'), 'unavailable', undefined],
     ['a non-error value', 'boom', 'unavailable', undefined],
   ])('maps %s', (_case, error, kind, upstreamStatus) => {
     const llmError = toLlmError(error);

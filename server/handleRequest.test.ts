@@ -153,6 +153,22 @@ describe('handleRequest', () => {
     expect(logError).toHaveBeenCalledWith({ code: 'LLM_QUOTA_EXCEEDED', upstreamStatus: 429 });
   });
 
+  it('returns 504 when the model does not answer in time', async () => {
+    const { dependencies, logError } = setup([new LlmError('timeout')]);
+
+    const response = await handleRequest(analyzeRequest(), dependencies);
+
+    expect(response.status).toBe(504);
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe(ALLOWED_ORIGIN);
+    expect(await errorBody(response)).toEqual({
+      error: {
+        code: 'LLM_TIMEOUT',
+        message: 'Model AI nie odpowiedział na czas. Spróbuj ponownie za chwilę.',
+      },
+    });
+    expect(logError).toHaveBeenCalledWith({ code: 'LLM_TIMEOUT' });
+  });
+
   it.each<[string, LlmError, number, string]>([
     [
       'an unavailable provider',
