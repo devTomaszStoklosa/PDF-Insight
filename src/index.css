@@ -13,3 +13,9 @@ main {
   margin: 0 auto;
   padding: 1rem;
 }
+
+.notice {
+  border-left: 4px solid #d97706;
+  padding: 0.5rem 0.75rem;
+  background: color-mix(in srgb, #d97706 12%, transparent);
+}
