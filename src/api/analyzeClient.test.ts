@@ -104,10 +104,14 @@ describe('createAnalyzeClient', () => {
     );
   });
 
-  it('reports a network failure', async () => {
-    await expect(analyze(() => Promise.reject(new TypeError('Failed to fetch')))).rejects.toThrow(
-      ANALYZE_MESSAGES.network,
+  it('reports a network failure without blaming the user connection', async () => {
+    const failure = analyze(() => Promise.reject(new TypeError('Failed to fetch')));
+
+    // A failed request also looks like this when the API is down, e.g. on a failed preflight.
+    await expect(failure).rejects.toThrow(
+      'Nie udało się połączyć z usługą analizy. Spróbuj ponownie za chwilę.',
     );
+    expect(ANALYZE_MESSAGES.network).not.toMatch(/internet/i);
   });
 
   it('reports a timeout', async () => {
