@@ -3,5 +3,12 @@
     "api/analyze.ts": {
       "maxDuration": 60
     }
-  }
+  },
+  "redirects": [
+    {
+      "source": "/((?!api/).*)",
+      "destination": "https://devtomaszstoklosa.github.io/PDF-Insight/",
+      "permanent": false
+    }
+  ]
 }
