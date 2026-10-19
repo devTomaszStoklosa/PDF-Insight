@@ -9,6 +9,8 @@ export interface ServerConfig {
   readonly llmApiKey: string;
   readonly llmModel: string;
   readonly allowedOrigins: ReadonlySet<string>;
+  /** Upstash Redis REST endpoint and token for the request limit. */
+  readonly rateLimitStore: { readonly url: string; readonly token: string };
 }
 
 /** An origin is scheme + host + optional port, with no path or trailing slash. */
@@ -35,6 +37,12 @@ const envSchema = z.object({
         .filter((origin) => origin !== ''),
     )
     .pipe(z.array(z.string().refine(isOrigin)).min(1)),
+  // Required, so a deployment cannot run without the request limit.
+  UPSTASH_REDIS_REST_URL: z
+    .string()
+    .trim()
+    .pipe(z.url({ protocol: /^https$/ })),
+  UPSTASH_REDIS_REST_TOKEN: z.string().trim().min(1),
 });
 
 /**
@@ -51,5 +59,9 @@ export function loadConfig(env: Readonly<Record<string, string | undefined>>): S
     llmApiKey: result.data.LLM_API_KEY,
     llmModel: result.data.LLM_MODEL ?? DEFAULT_LLM_MODEL,
     allowedOrigins: new Set(result.data.ALLOWED_ORIGIN),
+    rateLimitStore: {
+      url: result.data.UPSTASH_REDIS_REST_URL,
+      token: result.data.UPSTASH_REDIS_REST_TOKEN,
+    },
   };
 }

@@ -22,7 +22,9 @@ start the API proxy locally as well:
 1. In `.env.local` set:
    - `LLM_API_KEY`: a Gemini API key from Google AI Studio,
    - `ALLOWED_ORIGIN=http://localhost:5173`,
-   - `VITE_API_URL=http://localhost:3000`.
+   - `VITE_API_URL=http://localhost:3000`,
+   - `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`: an Upstash Redis database for
+     the request limit (see below).
 2. In one terminal run `npm run dev:api`. It serves the real `api/analyze.ts` at
    `http://localhost:3000/api/analyze`, on loopback only.
 3. In another terminal run `npm run dev` and open http://localhost:5173.
@@ -57,5 +59,16 @@ project:
 - `LLM_MODEL` (optional): defaults to `gemini-3.1-flash-lite`.
 - `ALLOWED_ORIGIN`: must include `https://devtomaszstoklosa.github.io`. An origin has no
   path, so it does not include `/PDF-Insight/`.
+- `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` (secret): the REST endpoint and
+  token of an Upstash Redis database (the free plan is enough). Both are required; without
+  them the API answers `SERVER_MISCONFIGURED`.
 
 CORS limits which websites can read the responses; it does not authenticate callers.
+
+#### Request limit
+
+Each client may request 5 analyses per minute and 30 per day; further requests get HTTP 429
+`RATE_LIMITED` with a `Retry-After` header. Clients are identified by IP address, which the
+API hashes before storing it in Redis. Users behind one shared address share the limit. If
+Redis is unreachable or slower than 1 s, the request is allowed and
+`RATE_LIMIT_UNAVAILABLE` is logged, so a Redis outage does not take the demo down.

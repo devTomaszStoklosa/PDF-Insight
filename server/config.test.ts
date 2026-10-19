@@ -4,9 +4,13 @@ import { HttpError } from './errors.ts';
 
 const SECRET = 'test-key-1234567890';
 
+const STORE_TOKEN = 'upstash-token-0987654321';
+
 const validEnv = {
   LLM_API_KEY: SECRET,
   ALLOWED_ORIGIN: 'https://devtomaszstoklosa.github.io',
+  UPSTASH_REDIS_REST_URL: 'https://example-db.upstash.io',
+  UPSTASH_REDIS_REST_TOKEN: STORE_TOKEN,
 };
 
 function loadError(env: Record<string, string | undefined>): unknown {
@@ -25,6 +29,10 @@ describe('loadConfig', () => {
     expect(config.llmApiKey).toBe(SECRET);
     expect(config.llmModel).toBe(DEFAULT_LLM_MODEL);
     expect([...config.allowedOrigins]).toEqual(['https://devtomaszstoklosa.github.io']);
+    expect(config.rateLimitStore).toEqual({
+      url: 'https://example-db.upstash.io',
+      token: STORE_TOKEN,
+    });
   });
 
   it('uses LLM_MODEL when set', () => {
@@ -57,12 +65,19 @@ describe('loadConfig', () => {
     ['an origin with a path', { ...validEnv, ALLOWED_ORIGIN: 'https://example.com/app' }],
     ['an origin with a trailing slash', { ...validEnv, ALLOWED_ORIGIN: 'https://example.com/' }],
     ['a wildcard origin', { ...validEnv, ALLOWED_ORIGIN: '*' }],
+    ['a missing Upstash URL', { ...validEnv, UPSTASH_REDIS_REST_URL: undefined }],
+    ['a plain-HTTP Upstash URL', { ...validEnv, UPSTASH_REDIS_REST_URL: 'http://db.upstash.io' }],
+    ['an invalid Upstash URL', { ...validEnv, UPSTASH_REDIS_REST_URL: 'example-db.upstash.io' }],
+    ['a missing Upstash token', { ...validEnv, UPSTASH_REDIS_REST_TOKEN: undefined }],
+    ['a blank Upstash token', { ...validEnv, UPSTASH_REDIS_REST_TOKEN: ' ' }],
   ])('rejects %s without revealing values', (_case, env) => {
     const error = loadError(env);
 
     expect(error).toBeInstanceOf(HttpError);
     expect(error).toMatchObject({ code: 'SERVER_MISCONFIGURED', status: 500 });
-    expect(JSON.stringify((error as HttpError).toBody())).not.toContain(SECRET);
-    expect((error as HttpError).message).not.toContain(SECRET);
+    for (const secret of [SECRET, STORE_TOKEN]) {
+      expect(JSON.stringify((error as HttpError).toBody())).not.toContain(secret);
+      expect((error as HttpError).message).not.toContain(secret);
+    }
   });
 });
