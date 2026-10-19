@@ -6,6 +6,103 @@ the browser.
 
 Demo: https://devtomaszstoklosa.github.io/PDF-Insight/
 
+![The result of an invoice analysis: document type, page count, language and date badges,
+the summary, the key points and the recent-analyses panel](docs/screenshot.jpg)
+
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph Browser["Browser: React SPA on GitHub Pages"]
+    PDF["PDF file, max. 10 MB"] --> Extract["Text extraction<br/>pdf.js in a web worker"]
+    Extract --> Client["API client<br/>max. 150,000 characters, 60 s"]
+    Client --> Check["Zod validation<br/>same schema as the server"]
+    Check --> UI["Dashboard, JSON download,<br/>last 3 analyses in localStorage"]
+  end
+  subgraph Vercel["API proxy: Vercel function api/analyze.ts"]
+    Guard["CORS allowlist, body limits,<br/>request limit per IP"] --> Prompt["Prompt with the document<br/>as untrusted data"]
+    Prompt --> Validate["Zod validation,<br/>one self-correction retry"]
+  end
+  Redis[("Upstash Redis<br/>request counters")]
+  Gemini["Google Gemini API<br/>free tier"]
+  Client -- "POST /api/analyze: text only" --> Guard
+  Guard <--> Redis
+  Prompt <--> Gemini
+  Validate -- "JSON in the brief's schema" --> Client
+```
+
+1. The browser checks the file (PDF, max. 10 MB) and extracts its text layer with pdf.js. The
+   file never leaves the device; only the text, the file name and the page count are sent.
+2. The Vercel function checks the origin, the body size and the request limit, then asks
+   Gemini for a JSON object constrained by a response schema.
+3. The server validates the reply with Zod. An invalid reply gets exactly one correction
+   request that quotes the validation error; a second invalid reply ends with 502
+   `LLM_INVALID_OUTPUT`. Errors reach the user as Polish messages with a stable code.
+4. The browser validates the response again with the same schema before it shows anything,
+   and keeps the last 3 analyses in `localStorage`, re-validated whenever they are read.
+
+## Key decisions
+
+- **Gemini free tier, `gemini-3.1-flash-lite` by default.** The demo costs nothing and the key
+  belongs to a Google Cloud project without billing, so requests above the quota are rejected,
+  not charged. On the free tier, `gemini-3.8-flash` took 20–35 s for a one-page invoice and
+  sometimes answered 503; the lite model took about 4–10 s with valid output (#31). The provider sits
+  behind the `LlmClient` interface, so another one needs only a new adapter.
+- **Text extraction in the browser.** The PDF never reaches a server, uploads stay small, and
+  scanned files are rejected before any API call. pdf.js loads only when the first file
+  arrives, and its Adobe CMaps are served with the app, so CID-keyed fonts (common in CJK
+  documents) also yield text.
+- **One data contract.** `src/types/schema.ts` defines the result once with Zod. The server
+  derives the JSON schema for the model from it, and both the server and the browser validate
+  with it. It follows the layout and key order of the schema in the brief, uses strict objects
+  (unknown keys fail), and checks ISO 639-1 languages, ISO 4217 currencies, ISO 8601 dates,
+  3–5 summary sentences and 3–7 key points.
+- **Analysis in the document's language.** The summary, key points, contexts and keywords are
+  written in the document's main language (`document.language`); keys stay in English.
+- **One self-correction retry.** Enough to fix a typical schema slip, while capping one
+  analysis at two model calls of the free quota.
+- **A fixed time budget.** Each Gemini request is limited to 25 s, so two requests fit within
+  the browser's 60 s limit and the function's 60 s `maxDuration`. A timeout ends as 504
+  `LLM_TIMEOUT` with its own message.
+- **A post-deploy check.** After each deploy from `main`, the Pages workflow sends a CORS
+  preflight to the API and waits until it answers 204 and reports the deployed commit, so a
+  crashing, misconfigured or outdated API fails the run.
+
+## Security
+
+- **The API key stays on the server.** Only the Vercel function reads `LLM_API_KEY`; `VITE_*`
+  variables are public and hold no secrets.
+- **CORS with an exact allowlist** of origins from `ALLOWED_ORIGIN`; look-alike origins and
+  wildcards are rejected. CORS limits which websites can read responses; it is not
+  authentication.
+- **Limits:** the file (10 MB, checked in the browser), the text (150,000 characters), the
+  request body (JSON only, 1 MB, counted while it is read) and the file name (255
+  characters), plus the request limit per IP described below.
+- **Untrusted input:** the document text is wrapped in delimiters that the text cannot close,
+  and the prompt tells the model to treat instructions inside the document as content.
+- **No document content in logs:** the function logs error codes and upstream status codes
+  only; provider error messages are dropped because they may quote the request.
+- **No storage at the provider:** Gemini requests use `store: false`. The UI asks users not to
+  upload confidential documents, as the free-tier terms require.
+- **Hardening headers:** `Cache-Control: no-store` and `X-Content-Type-Options: nosniff` on
+  every API response.
+
+## Known limitations
+
+- **Long documents:** text above 150,000 characters is rejected; there is no splitting into
+  chunks yet (#24).
+- **Scans:** there is no OCR. A PDF without a text layer ends with a message asking for one.
+- **Free-tier quota and load:** when the quota is used up, the API answers 429
+  `LLM_QUOTA_EXCEEDED`. Gemini sometimes answers 503 under load; trying again usually works.
+- **Safety blocks:** Gemini's Interactions API gives no explicit safety signal, so a blocked
+  reply ends as 503 `LLM_UNAVAILABLE`, not as a dedicated error.
+- **Request limit per IP:** users behind one shared address share it.
+- **Sentence counting is heuristic:** it uses `Intl.Segmenter`, which can misjudge rare
+  abbreviations; a wrong count triggers the correction retry.
+- **History stays in one browser:** the last 3 analyses live in `localStorage` and disappear
+  with the browser data.
+- **AI output can be wrong:** the UI says so; check important values against the document.
+
 ## Local development
 
 Requirements: Node.js 22 and npm.
@@ -51,8 +148,8 @@ One-time setup in the repository settings:
 
 ### API proxy: Vercel
 
-`api/analyze.ts` is a Vercel function. Set these environment variables in the Vercel
-project:
+`api/analyze.ts` is a Vercel function. Every other path on the Vercel domain redirects to the
+GitHub Pages demo (`vercel.json`). Set these environment variables in the Vercel project:
 
 - `LLM_API_KEY` (secret): use a Google Cloud project without billing, so requests above the
   free tier are rejected instead of charged.
