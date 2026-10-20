@@ -9,14 +9,16 @@ import { withAppVersion } from '../server/http.ts';
 import { createUpstashRateLimiter } from '../server/upstashRateLimiter.ts';
 
 // A warning, not an error: after a successful retry the analysis still succeeds. A failure
-// that reaches the user is logged once more by handleRequest. Codes and statuses only.
+// that reaches the user is logged once more by handleRequest. Codes and statuses only; a
+// timeout has no upstream status, and JSON.stringify leaves the undefined field out.
 function logTransientError(event: TransientErrorEvent): void {
   console.warn(
     JSON.stringify({
       level: 'warn',
       source: 'api/analyze',
       code: 'LLM_TRANSIENT_ERROR',
-      upstreamStatus: event.upstreamStatus,
+      kind: event.kind,
+      upstreamStatus: event.kind === 'server_error' ? event.upstreamStatus : undefined,
       retry: event.retry,
     }),
   );
