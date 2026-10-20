@@ -2,7 +2,7 @@
 
 This log documents how AI was used to build PDF Insight: the tools, the key prompts, where the
 AI agent went wrong and how it was corrected. Every entry can be traced to a Claude Code
-session in this repository, an issue or pull request (#1–#42), or the git history. It describes
+session in this repository, an issue or pull request (#1–#53), or the git history. It describes
 the state at submission, on 2026-10-20.
 
 The log itself was drafted with Claude Code from the session transcripts and the git history,
@@ -41,8 +41,8 @@ session:
 
 ## Kluczowe Prompty (Key Prompts)
 
-Every main build prompt (1–5) had the same four-part structure; the review prompt (6) was a
-short request with the brief attached:
+Every build prompt (1–4) had the same four-part structure; the review prompts (5) were short
+requests with the brief attached:
 
 - **Role:** a persona with a matching area of expertise ("You are a Senior TypeScript
   Engineer…").
@@ -108,33 +108,44 @@ short request with the brief attached:
   `extractText` and `analyzeText` injected. History entries are re-validated with the Zod
   schema when read, because `localStorage` is untrusted.
 
-### 5. CI/CD ("DevOps Engineer")
+### 5. Pre-submission reviews ("Principal developer", "senior developer and architect")
 
-- **Asked for:** a GitHub Actions workflow that lints, tests and builds with the Vite base path,
-  deploys `dist` with `actions/deploy-pages`, has `pages: write` and `id-token: write`, and
-  fails fast.
-- **Outcome:** the workflow already existed in PR #12 (ticket #11, which the agent had drafted
-  as an out-of-scope finding while working on #9). The agent checked the prompt against it item
-  by item. The only gap was the file name: the prompt asks for `deploy.yml`, the file is
-  `deploy-pages.yml`. The agent proposed a rename; I kept `deploy-pages.yml`, because the name
-  says what the workflow does. PR #12 also adds `npm run dev:api`, a local server for the real
-  API handler. After the review, the workflow gained a format check and a post-deploy check
-  that the API answers and runs the deployed commit (#22, #36).
+- **Asked for:** two short requests, each with the brief attached. On 2026-10-19: "Zrób
+  dokładny review jako Principal developer czy wszystko w tym projekcie jest już gotowe zgodnie
+  z załączonymi wymaganiami. Jeśli widzisz cokolwiek do dopracowania daj znać" ("Review this
+  project as a principal developer: is everything ready according to the attached
+  requirements? Tell me about anything that needs work."). On 2026-10-20: "Jesteś senior
+  developerem i senior architektem. przeanalizuj dokładnie czy wszystko jest zaimplementowane
+  zgodnie z wymaganiami klienta i czy nie ma miejsc gdzie warto coś poparpawić, zoptymalizować
+  lub zrobić zgodnie z jakimiś wzorcami. To jest zadanie rekrutacyjne i ma być zrobione
+  idealnie." ("You are a senior developer and a senior architect. Check carefully that
+  everything is implemented according to the client's requirements, and whether anything is
+  worth improving, optimizing or doing according to a pattern. This is a recruitment task, and
+  it has to be perfect.")
+- **Outcome of the first review:** the agent compared the repository with the brief section by
+  section and called the deployed API. It found that every request to the deployed API crashed
+  (#18), that the JSON layout and the output language did not match the brief (#19, #20), and
+  smaller gaps (#16, #21, #22, #24–#27). One security-related finding was reported privately
+  instead of in a public issue, and fixed in PR #34. I approved an order, and each finding went
+  through its own plan and pull request (PRs #28–#41). #24, splitting long documents into
+  parts, was postponed and then implemented in PR #43, followed by a retry after transient
+  Gemini errors (#44) and warnings for them (#46).
+- **Outcome of the second review:** the agent checked the brief point by point and sent 9
+  analyses to the demo API; 2 ended with 504 after 25 s (see mistake 7). It also found that this
+  log contradicted the README about #24 and listed 6 key prompts instead of 3–5 (#49), and that
+  the demo had no favicon (#48). It reported the findings by priority, with a plan; each
+  approved finding got its own ticket and pull request (PRs #50, #52, #53).
 
-### 6. Pre-submission review ("Principal developer")
+### Other prompts
 
-- **Asked for:** "Zrób dokładny review jako Principal developer czy wszystko w tym projekcie
-  jest już gotowe zgodnie z załączonymi wymaganiami. Jeśli widzisz cokolwiek do dopracowania
-  daj znać" ("Review this project as a principal developer: is everything ready according to
-  the attached requirements? Tell me about anything that needs work."), with the brief
-  attached.
-- **Outcome:** the agent compared the repository with the brief section by section and called
-  the deployed API. It found that every request to the deployed API crashed (#18), that the
-  JSON layout and the output language did not match the brief (#19, #20), and smaller gaps
-  (#16, #21, #22, #24–#27). One security-related finding was reported privately instead of in
-  a public issue, and fixed in PR #34. I approved an order, and each finding went through its
-  own plan and pull request (PRs #28–#41). #24, splitting long documents into chunks, stays
-  open as a known limitation.
+- **CI/CD ("DevOps Engineer"):** asked for a GitHub Actions workflow that lints, tests, builds
+  with the Vite base path and deploys `dist` with `actions/deploy-pages`. The workflow already
+  existed in PR #12 (ticket #11, which the agent had drafted as an out-of-scope finding while
+  working on #9), so the agent checked the prompt against it item by item. The only gap was the
+  file name: the prompt asks for `deploy.yml`, the file is `deploy-pages.yml`, and I kept it,
+  because the name says what the workflow does. After the first review, the workflow gained a
+  format check and a post-deploy check that the API answers and runs the deployed commit (#22,
+  #36).
 
 ### Short steering prompts
 
@@ -154,8 +165,12 @@ Short replies that changed the agent's direction:
   that found the real cause of the timeouts (see mistake 5).
 - **"In Vercel Hobby plan I don't have Vercel Firewall, so let's go with Option 2: Upstash
   Redis"**: chose how the request limit is stored (PR #34).
-- **"Pomiń #24"** ("Skip #24"): kept the optional chunking of long documents out of the
-  submission.
+- **"Pomiń #24"** ("Skip #24"): postponed the optional chunking of long documents; it was
+  implemented later, in PR #43.
+- **"Zatwierdzam plan: pomiar na kluczu z .env.local, tickety A, B, C i porządki repo
+  (usunięcie zmergowanych branchy)."** ("I approve the plan: the measurement with the key in
+  .env.local, tickets A, B and C (#51, #49, #48), and the clean-up of merged branches."):
+  allowed the 21 measured calls behind the fix for mistake 7.
 
 ## Potknięcia AI i Poprawki (AI Mistakes & Fixes)
 
@@ -261,6 +276,24 @@ Short replies that changed the agent's direction:
   the English example in English; tests check the rule and each example's language. On the
   demo, an English agreement then got English output, and a Polish invoice Polish output.
 - **Lesson:** the same as mistake 3: every rule in a prompt should trace back to the brief.
+
+### 7. A stalled request treated as a final answer
+
+- **What the AI did:** the time budget from #16 ended the analysis when a request to Gemini
+  timed out, and the retry added in #44 covered only the 500 and 503 answers. A timeout was
+  final, although half of the 50 s budget was still left.
+- **How it was found:** the second pre-submission review (prompt 5) sent 9 analyses to the demo
+  API. 2 ended with 504 after 25 s, both for a short Polish contract that passed in 5–12 s in
+  four other attempts.
+- **The fix:** this time the agent measured first. With my key in the git-ignored `.env.local`,
+  it made 21 direct calls with a 90 s timeout: 20 replies took 2.2–8.8 s and one 15.6 s, all
+  with normal token counts, so the requests stall on the provider's side instead of generating
+  too much. PR #52 limits the first attempt to 15 s and sends a stalled request once more with
+  25 s, if the deadline allows it (#51). A local run with the real SDK and a forced first
+  timeout logged the retry and returned the analysis in 6.6 s; after the deploy, 7 analyses on
+  the demo took 3.1–5.8 s, and none stalled.
+- **Lesson:** a retry policy should follow the failures measured on the deployed system, not
+  only the error codes the provider documents.
 
 ### Smaller findings
 
