@@ -90,8 +90,8 @@ flowchart LR
   attempt, the wait and a full retry always fit. A timeout ends as 504 `LLM_TIMEOUT` with its
   own message.
 - **A post-deploy check.** After each deploy from `main`, the Pages workflow sends a CORS
-  preflight to the API and waits until it answers 204 and reports the deployed commit, so a
-  crashing, misconfigured or outdated API fails the run.
+  preflight to the API and waits until it answers 204 and reports the deployed commit, or a
+  newer one that contains it, so a crashing, misconfigured or outdated API fails the run.
 
 ## Security
 
@@ -201,8 +201,9 @@ GitHub Pages demo (`vercel.json`). Set these environment variables in the Vercel
 
 Keep "Automatically expose System Environment Variables" on (the default): every API
 response carries the deployed commit in `X-App-Version`, read from `VERCEL_GIT_COMMIT_SHA`.
-After each deploy, the Pages workflow waits until the API reports the commit it deployed,
-so a failed or unpromoted Vercel deployment fails the run.
+After each deploy, the Pages workflow waits until the API reports the commit it deployed, or
+a newer one that contains it (a later merge can reach Vercel first), so a failed or
+unpromoted Vercel deployment fails the run.
 
 CORS limits which websites can read the responses; it does not authenticate callers.
 
