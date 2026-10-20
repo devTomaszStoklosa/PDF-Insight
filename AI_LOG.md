@@ -116,7 +116,7 @@ requests with the brief attached:
   project as a principal developer: is everything ready according to the attached
   requirements? Tell me about anything that needs work."). On 2026-10-20: "Jesteś senior
   developerem i senior architektem. przeanalizuj dokładnie czy wszystko jest zaimplementowane
-  zgodnie z wymaganiami klienta i czy nie ma miejsc gdzie warto coś poparpawić, zoptymalizować
+  zgodnie z wymaganiami klienta i czy nie ma miejsc gdzie warto coś poprawić, zoptymalizować
   lub zrobić zgodnie z jakimiś wzorcami. To jest zadanie rekrutacyjne i ma być zrobione
   idealnie." ("You are a senior developer and a senior architect. Check carefully that
   everything is implemented according to the client's requirements, and whether anything is
