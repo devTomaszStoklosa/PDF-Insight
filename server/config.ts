@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { HttpError } from './errors.ts';
 
 // On the free tier, gemini-3.8-flash took 20–35 s per analysis and sometimes answered 503;
-// this model took 6–9 s, within REQUEST_TIMEOUT_MS and the brief's 30 s target.
+// this model took 6–9 s, within FIRST_ATTEMPT_TIMEOUT_MS and the brief's 30 s target.
 export const DEFAULT_LLM_MODEL = 'gemini-3.1-flash-lite';
 
 export interface ServerConfig {

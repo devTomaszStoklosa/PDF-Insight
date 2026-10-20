@@ -27,9 +27,17 @@ const MAX_OUTPUT_TOKENS = 16_000;
 // Extraction and summarising need little reasoning. Not every model accepts 'minimal'
 // (gemini-3.8-flash answers 400), so 'low' is the lowest level used.
 const THINKING_LEVEL = 'low';
-// Short enough that a single-call analysis, one request and its correction retry, always fits
-// within ANALYSIS_BUDGET_MS.
-export const REQUEST_TIMEOUT_MS = 25_000;
+/**
+ * The first attempt of each request. Measured on the free tier on 2026-10-20 (#51): 20 of 21
+ * replies took 2.2–8.8 s and one 15.6 s, while 2 of 9 analyses on the demo stalled past 25 s.
+ * A first attempt that runs this long has most likely stalled, so it is sent once more.
+ */
+export const FIRST_ATTEMPT_TIMEOUT_MS = 15_000;
+/**
+ * The retry after a transient failure gets longer, so a slow but healthy reply is not cut
+ * twice. A stalled first attempt, the wait and this retry fit within ANALYSIS_BUDGET_MS.
+ */
+export const RETRY_TIMEOUT_MS = 25_000;
 /**
  * Time the server gives one analysis. It stays below the browser's ANALYZE_TIMEOUT_MS (60 s,
  * src/api/analyzeClient.ts) and maxDuration in vercel.json, so the user gets the server's own
@@ -49,7 +57,7 @@ function requestOptions(timeoutMs: number): GoogleGenAIRequestOptions {
 const TRANSIENT_STATUSES: ReadonlySet<number> = new Set([500, 503]);
 // The wait before the one retry: 1 s, as the documentation suggests, plus up to 1 s of jitter,
 // so parts that failed together do not all retry at the same moment.
-const RETRY_DELAY_MS = { base: 1_000, jitter: 1_000 } as const;
+export const RETRY_DELAY_MS = { base: 1_000, jitter: 1_000 } as const;
 /**
  * A retry is made only if this much time is left after the wait. Part-sized requests took
  * 3.5–14 s on the free tier; with less time left, a retry would likely spend a request of the
@@ -57,20 +65,32 @@ const RETRY_DELAY_MS = { base: 1_000, jitter: 1_000 } as const;
  */
 export const MIN_RETRY_TIME_MS = 15_000;
 
-/** The upstream status of a transient server error, or undefined for any other error. */
-function transientStatus(error: unknown): number | undefined {
-  if (!(error instanceof LlmError) || error.upstreamStatus === undefined) {
+/** A failure after which the session sends the same request once more, if time allows. */
+type TransientFailure =
+  { readonly kind: 'server_error'; readonly upstreamStatus: number } | { readonly kind: 'timeout' };
+
+/**
+ * The transient failure behind an error, or undefined for any other error. A timeout counts
+ * only if the attempt had its full FIRST_ATTEMPT_TIMEOUT_MS: an attempt cut short by the
+ * deadline did not stall, the analysis ran out of time.
+ */
+function transientFailure(error: unknown, hadFullTime: boolean): TransientFailure | undefined {
+  if (!(error instanceof LlmError)) {
     return undefined;
   }
-  return TRANSIENT_STATUSES.has(error.upstreamStatus) ? error.upstreamStatus : undefined;
+  if (error.kind === 'timeout') {
+    return hadFullTime ? { kind: 'timeout' } : undefined;
+  }
+  return error.upstreamStatus !== undefined && TRANSIENT_STATUSES.has(error.upstreamStatus)
+    ? { kind: 'server_error', upstreamStatus: error.upstreamStatus }
+    : undefined;
 }
 
-/** A transient server error and what the session did about it. */
-export interface TransientErrorEvent {
-  readonly upstreamStatus: number;
+/** A transient failure and what the session did about it. */
+export type TransientErrorEvent = TransientFailure & {
   /** `skipped`: too little time was left before the deadline for a retry. */
   readonly retry: 'succeeded' | 'failed' | 'skipped';
-}
+};
 
 export type TransientErrorListener = (event: TransientErrorEvent) => void;
 
@@ -203,38 +223,44 @@ class GeminiSession implements LlmSession {
   }
 
   /**
-   * Sends the request and, after a transient server error, sends it once more if a retry can
-   * still finish before the deadline. A failed request leaves the history unchanged, so the
-   * retry sends exactly the same input. Every transient error is reported with its outcome.
+   * Sends the request and, after a transient failure (a server error or a stalled first
+   * attempt), sends it once more if a retry can still finish before the deadline. A failed
+   * request leaves the history unchanged, so the retry sends exactly the same input. Every
+   * transient failure is reported with its outcome.
    */
   async #createWithRetry(input: Interactions.Step[]): Promise<GoogleGenAIInteraction> {
+    const firstTimeoutMs = this.#timeout(FIRST_ATTEMPT_TIMEOUT_MS);
     try {
-      return await this.#create(input);
+      return await this.#create(input, firstTimeoutMs);
     } catch (error) {
-      const upstreamStatus = transientStatus(error);
-      if (upstreamStatus === undefined) {
+      const failure = transientFailure(error, firstTimeoutMs === FIRST_ATTEMPT_TIMEOUT_MS);
+      if (failure === undefined) {
         throw error;
       }
       const delayMs = RETRY_DELAY_MS.base + this.#timing.random() * RETRY_DELAY_MS.jitter;
-      // Too little time for a retry: report the provider's error at once.
+      // Too little time for a retry: fail at once with the first error.
       if (this.#timing.timeLeft() - delayMs < MIN_RETRY_TIME_MS) {
-        this.#onTransientError({ upstreamStatus, retry: 'skipped' });
+        this.#onTransientError({ ...failure, retry: 'skipped' });
         throw error;
       }
       await this.#timing.sleep(delayMs);
       try {
-        const interaction = await this.#create(input);
-        this.#onTransientError({ upstreamStatus, retry: 'succeeded' });
+        const interaction = await this.#create(input, this.#timeout(RETRY_TIMEOUT_MS));
+        this.#onTransientError({ ...failure, retry: 'succeeded' });
         return interaction;
       } catch (retryError) {
-        this.#onTransientError({ upstreamStatus, retry: 'failed' });
+        this.#onTransientError({ ...failure, retry: 'failed' });
         throw retryError;
       }
     }
   }
 
-  async #create(input: Interactions.Step[]): Promise<GoogleGenAIInteraction> {
-    const timeoutMs = Math.min(REQUEST_TIMEOUT_MS, this.#timing.timeLeft());
+  /** The attempt's own time limit, cut to the time left before the deadline. */
+  #timeout(limitMs: number): number {
+    return Math.min(limitMs, this.#timing.timeLeft());
+  }
+
+  async #create(input: Interactions.Step[], timeoutMs: number): Promise<GoogleGenAIInteraction> {
     // The deadline has passed: fail as a timeout without spending a request of the quota.
     if (timeoutMs <= 0) {
       throw new LlmError('timeout');

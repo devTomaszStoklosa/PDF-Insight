@@ -8,9 +8,11 @@ import { describe, expect, it } from 'vitest';
 import { ANALYZE_TIMEOUT_MS } from '../src/api/analyzeClient.ts';
 import {
   ANALYSIS_BUDGET_MS,
+  FIRST_ATTEMPT_TIMEOUT_MS,
   GeminiLlmClient,
   MIN_RETRY_TIME_MS,
-  REQUEST_TIMEOUT_MS,
+  RETRY_DELAY_MS,
+  RETRY_TIMEOUT_MS,
   toGeminiSchema,
   toLlmError,
   type InteractionsApi,
@@ -154,7 +156,7 @@ describe('GeminiLlmClient', () => {
     expect(fake.calls[0]?.previous_interaction_id).toBeUndefined();
   });
 
-  it('asks for a low thinking level and limits each request to the timeout', async () => {
+  it('asks for a low thinking level and limits the first attempt to its timeout', async () => {
     const fake = fakeInteractions([interaction('completed', [modelOutput('{}')], '{}')]);
     const session = new GeminiLlmClient(fake.api, 'gemini-test').startSession(SESSION_OPTIONS);
 
@@ -162,7 +164,7 @@ describe('GeminiLlmClient', () => {
 
     expect(fake.calls[0]?.generation_config).toMatchObject({ thinking_level: 'low' });
     expect(fake.requestOptions[0]).toEqual({
-      timeout_ms: REQUEST_TIMEOUT_MS,
+      timeout_ms: FIRST_ATTEMPT_TIMEOUT_MS,
       retries: { strategy: 'none' },
     });
   });
@@ -174,17 +176,17 @@ describe('GeminiLlmClient', () => {
     ]);
     let now = 1_000;
     const client = new GeminiLlmClient(fake.api, 'gemini-test', {
-      deadline: 1_000 + REQUEST_TIMEOUT_MS + 5_000,
+      deadline: 1_000 + FIRST_ATTEMPT_TIMEOUT_MS + 5_000,
       now: () => now,
     });
 
     await client.startSession(SESSION_OPTIONS).send('Analyze.');
-    now += 15_000;
+    now += 10_000;
     await client.startSession(SESSION_OPTIONS).send('Analyze.');
 
     expect(fake.requestOptions.map((options) => options?.timeout_ms)).toEqual([
-      REQUEST_TIMEOUT_MS,
-      REQUEST_TIMEOUT_MS - 10_000,
+      FIRST_ATTEMPT_TIMEOUT_MS,
+      FIRST_ATTEMPT_TIMEOUT_MS - 5_000,
     ]);
   });
 
@@ -211,8 +213,14 @@ describe('GeminiLlmClient', () => {
     ) as { functions: Record<string, { maxDuration: number }> };
     const maxDurationMs = (vercelConfig.functions['api/analyze.ts']?.maxDuration ?? 0) * 1000;
 
-    // A request and its correction retry are never cut short by the deadline.
-    expect(2 * REQUEST_TIMEOUT_MS).toBeLessThanOrEqual(ANALYSIS_BUDGET_MS);
+    // The first attempts of a request and of its correction retry are never cut short.
+    expect(2 * FIRST_ATTEMPT_TIMEOUT_MS).toBeLessThanOrEqual(ANALYSIS_BUDGET_MS);
+    // A stalled first attempt still leaves time for the longest wait and a full retry.
+    const longestWaitMs = RETRY_DELAY_MS.base + RETRY_DELAY_MS.jitter;
+    expect(FIRST_ATTEMPT_TIMEOUT_MS + longestWaitMs + RETRY_TIMEOUT_MS).toBeLessThanOrEqual(
+      ANALYSIS_BUDGET_MS,
+    );
+    expect(MIN_RETRY_TIME_MS).toBeLessThanOrEqual(RETRY_TIMEOUT_MS);
     expect(ANALYSIS_BUDGET_MS).toBeLessThan(ANALYZE_TIMEOUT_MS);
     expect(ANALYSIS_BUDGET_MS).toBeLessThan(maxDurationMs);
   });
@@ -281,11 +289,14 @@ describe('GeminiLlmClient', () => {
   });
 });
 
-describe('GeminiLlmClient retry after a transient error', () => {
+describe('GeminiLlmClient retry after a transient failure', () => {
   const completed = (text: string): GoogleGenAIInteraction =>
     interaction('completed', [modelOutput(text)], text);
 
-  /** A client on a fake clock: waiting advances the clock instead of taking real time. */
+  /**
+   * A client on a fake clock: waiting advances the clock instead of taking real time, and a
+   * timeout arrives after the attempt's whole timeout, as it does with the SDK.
+   */
   function clientOnClock(
     responses: readonly (GoogleGenAIInteraction | Error)[],
     {
@@ -297,7 +308,16 @@ describe('GeminiLlmClient retry after a transient error', () => {
     const waits: number[] = [];
     const events: TransientErrorEvent[] = [];
     let now = 0;
-    const client = new GeminiLlmClient(fake.api, 'gemini-test', {
+    const api: InteractionsApi = {
+      create: (params, options) =>
+        fake.api.create(params, options).catch((error: unknown) => {
+          if (error instanceof FakeTimeoutError) {
+            now += options?.timeout_ms ?? 0;
+          }
+          throw error;
+        }),
+    };
+    const client = new GeminiLlmClient(api, 'gemini-test', {
       deadline,
       now: () => now,
       sleep: (ms) => {
@@ -368,14 +388,69 @@ describe('GeminiLlmClient retry after a transient error', () => {
     expect(fake.calls).toHaveLength(2);
   });
 
-  it('cuts the timeout of the retry to the time left after the wait', async () => {
+  it('gives the retry the longer timeout, cut to the time left after the wait', async () => {
     const { fake, session } = clientOnClock([new FakeApiError(503), completed('{}')], {
       deadline: 20_000,
     });
 
     await session.send('Analyze.');
 
-    expect(fake.requestOptions.map((options) => options?.timeout_ms)).toEqual([20_000, 18_500]);
+    expect(fake.requestOptions.map((options) => options?.timeout_ms)).toEqual([
+      FIRST_ATTEMPT_TIMEOUT_MS,
+      18_500,
+    ]);
+  });
+
+  it('retries a stalled first attempt once, with the longer retry timeout', async () => {
+    const { fake, waits, events, session } = clientOnClock([
+      new FakeTimeoutError(),
+      completed('{}'),
+    ]);
+
+    await expect(session.send('Analyze.')).resolves.toEqual({ kind: 'text', text: '{}' });
+    expect(fake.calls).toHaveLength(2);
+    expect(fake.calls[1]).toEqual(fake.calls[0]);
+    expect(waits).toHaveLength(1);
+    expect(fake.requestOptions.map((options) => options?.timeout_ms)).toEqual([
+      FIRST_ATTEMPT_TIMEOUT_MS,
+      RETRY_TIMEOUT_MS,
+    ]);
+    expect(events).toEqual([{ kind: 'timeout', retry: 'succeeded' }]);
+  });
+
+  it('fails as a timeout when the retry of a stalled attempt times out too', async () => {
+    const { fake, events, session } = clientOnClock([
+      new FakeTimeoutError(),
+      new FakeTimeoutError(),
+    ]);
+
+    await expect(session.send('Analyze.')).rejects.toMatchObject({ kind: 'timeout' });
+    expect(fake.calls).toHaveLength(2);
+    expect(events).toEqual([{ kind: 'timeout', retry: 'failed' }]);
+  });
+
+  it('does not retry or report a timeout cut short by the deadline', async () => {
+    const { fake, waits, events, session } = clientOnClock(
+      [new FakeTimeoutError(), completed('{}')],
+      { deadline: FIRST_ATTEMPT_TIMEOUT_MS - 1_000 },
+    );
+
+    await expect(session.send('Analyze.')).rejects.toMatchObject({ kind: 'timeout' });
+    expect(fake.calls).toHaveLength(1);
+    expect(waits).toEqual([]);
+    expect(events).toEqual([]);
+  });
+
+  it('skips the retry of a stalled first attempt when too little time is left', async () => {
+    // The first attempt has its full time; MIN_RETRY_TIME_MS is left after it, and the wait
+    // would cut that below the minimum.
+    const { fake, events, session } = clientOnClock([new FakeTimeoutError(), completed('{}')], {
+      deadline: FIRST_ATTEMPT_TIMEOUT_MS + MIN_RETRY_TIME_MS,
+    });
+
+    await expect(session.send('Analyze.')).rejects.toMatchObject({ kind: 'timeout' });
+    expect(fake.calls).toHaveLength(1);
+    expect(events).toEqual([{ kind: 'timeout', retry: 'skipped' }]);
   });
 
   it.each<[string, GoogleGenAIInteraction | Error]>([
@@ -383,7 +458,6 @@ describe('GeminiLlmClient retry after a transient error', () => {
     ['a 400', new FakeApiError(400)],
     ['a 404', new FakeApiError(404)],
     ['a 504', new FakeApiError(504)],
-    ['a timeout', new FakeTimeoutError()],
     ['a failed interaction', interaction('failed', [])],
   ])('does not retry after %s', async (_case, response) => {
     const { fake, waits, session } = clientOnClock([response, completed('{}')]);
@@ -398,7 +472,7 @@ describe('GeminiLlmClient retry after a transient error', () => {
 
     await session.send('Analyze.');
 
-    expect(events).toEqual([{ upstreamStatus: 503, retry: 'succeeded' }]);
+    expect(events).toEqual([{ kind: 'server_error', upstreamStatus: 503, retry: 'succeeded' }]);
   });
 
   it('reports a transient error whose retry failed, with the status of the first error', async () => {
@@ -406,7 +480,7 @@ describe('GeminiLlmClient retry after a transient error', () => {
 
     await expect(session.send('Analyze.')).rejects.toBeInstanceOf(LlmError);
 
-    expect(events).toEqual([{ upstreamStatus: 500, retry: 'failed' }]);
+    expect(events).toEqual([{ kind: 'server_error', upstreamStatus: 500, retry: 'failed' }]);
   });
 
   it('reports a transient error skipped for lack of time', async () => {
@@ -416,14 +490,13 @@ describe('GeminiLlmClient retry after a transient error', () => {
 
     await expect(session.send('Analyze.')).rejects.toBeInstanceOf(LlmError);
 
-    expect(events).toEqual([{ upstreamStatus: 503, retry: 'skipped' }]);
+    expect(events).toEqual([{ kind: 'server_error', upstreamStatus: 503, retry: 'skipped' }]);
   });
 
   it.each<[string, GoogleGenAIInteraction | Error]>([
     ['a successful request', completed('{}')],
     ['a 429', new FakeApiError(429)],
     ['a 504', new FakeApiError(504)],
-    ['a timeout', new FakeTimeoutError()],
   ])('reports nothing after %s', async (_case, response) => {
     const { events, session } = clientOnClock([response]);
 
