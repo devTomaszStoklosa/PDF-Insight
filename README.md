@@ -62,13 +62,17 @@ flowchart LR
   written in the document's main language (`document.language`); keys stay in English.
 - **One self-correction retry.** Enough to fix a typical schema slip, while capping each
   model call at two replies to validate.
-- **One retry after a transient error (#44).** When Gemini answers 500 or 503, which its
-  documentation says to retry, the server waits 1 s plus up to 1 s of jitter and sends the
-  same request once more, but only if at least 15 s are left before the deadline; otherwise
-  the user gets the error at once. The SDK's own retries stay off, because they give every
-  attempt the full timeout. With the correction retry, one model call takes at most 4
-  requests, and only when errors occur. Every such error is logged as a warning with what the
-  retry did (#46), so its frequency and the 15 s condition can be checked in the logs.
+- **One retry after a transient failure (#44, #51).** When Gemini answers 500 or 503, which
+  its documentation says to retry, or when the first attempt of a request uses up its 15 s,
+  the server waits 1 s plus up to 1 s of jitter and sends the same request once more, with
+  25 s, but only if at least 15 s are left before the deadline; otherwise the user gets the
+  error at once. On the free tier, 20 of 21 measured replies took 2.2–8.8 s and one 15.6 s,
+  while 2 of 9 analyses on the demo stalled past 25 s; a stalled request now ends with a
+  result after about 20–28 s instead of an error. A first attempt cut short by the deadline
+  is not retried. The SDK's own retries stay off, because they give every attempt the full
+  timeout. With the correction retry, one model call takes at most 4 requests, and only when
+  errors occur. Every such failure is logged as a warning with what the retry did (#46), so
+  its frequency and the minimum time left for a retry can be checked in the logs.
 - **Long documents in parts (#24).** Text up to 37,500 characters (about 10–12 dense pages)
   takes one call. Longer text, up to 225,000 characters, is split into at most 6 parts of
   similar length, cut at page, line or word boundaries. At most 3 parts are analyzed at once:
@@ -78,11 +82,12 @@ flowchart LR
   repeats too. One more call then writes the summary and key points of the whole document from
   the analyses of the parts. Each call has its own correction retry, and the result is
   validated against the same schema.
-- **A fixed time budget.** Each Gemini request is limited to 25 s, and every request must end
-  within 50 s of the start of the analysis: a later request gets only the time left, and none
-  starts after that. The server therefore answers before the browser's 60 s limit and the
-  function's 60 s `maxDuration`, and a single call with its retry always fits. A timeout ends
-  as 504 `LLM_TIMEOUT` with its own message.
+- **A fixed time budget.** The first attempt of a Gemini request is limited to 15 s and its
+  retry to 25 s, and every request must end within 50 s of the start of the analysis: a later
+  request gets only the time left, and none starts after that. The server therefore answers
+  before the browser's 60 s limit and the function's 60 s `maxDuration`, and a stalled first
+  attempt, the wait and a full retry always fit. A timeout ends as 504 `LLM_TIMEOUT` with its
+  own message.
 - **A post-deploy check.** After each deploy from `main`, the Pages workflow sends a CORS
   preflight to the API and waits until it answers 204 and reports the deployed commit, so a
   crashing, misconfigured or outdated API fails the run.
@@ -102,8 +107,9 @@ flowchart LR
   analyses of the parts of a long document are passed on to the final call the same way.
 - **No document content in logs:** the function logs error codes and upstream status codes
   only; provider error messages are dropped because they may quote the request. A transient
-  Gemini error is logged as a warning, `LLM_TRANSIENT_ERROR` with its status and `retry`
-  set to `succeeded`, `failed` or `skipped` (too little time left for a retry).
+  failure is logged as a warning, `LLM_TRANSIENT_ERROR` with its `kind` (`server_error` with
+  the upstream status, or `timeout`) and `retry` set to `succeeded`, `failed` or `skipped`
+  (too little time left for a retry).
 - **No storage at the provider:** Gemini requests use `store: false`. The UI asks users not to
   upload confidential documents, as the free-tier terms require.
 - **Hardening headers:** `Cache-Control: no-store` and `X-Content-Type-Options: nosniff` on
@@ -121,9 +127,9 @@ flowchart LR
   described differently in two parts is listed twice.
 - **Scans:** there is no OCR. A PDF without a text layer ends with a message asking for one.
 - **Free-tier quota and load:** when the quota is used up, the API answers 429
-  `LLM_QUOTA_EXCEEDED`. Gemini sometimes answers 503 under load. The server retries once by
-  itself; when the retry fails too, or too little time is left, the user sees 503
-  `LLM_UNAVAILABLE`, and trying again later usually works.
+  `LLM_QUOTA_EXCEEDED`. Under load, Gemini sometimes answers 503 or stalls. The server retries
+  once by itself; when the retry fails too, or too little time is left, the user sees 503
+  `LLM_UNAVAILABLE` or 504 `LLM_TIMEOUT`, and trying again later usually works.
 - **Safety blocks:** Gemini's Interactions API gives no explicit safety signal, so a blocked
   reply ends as 503 `LLM_UNAVAILABLE`, not as a dedicated error.
 - **Request limit per IP:** users behind one shared address share it.
