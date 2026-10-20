@@ -47,8 +47,9 @@ flowchart LR
 - **Gemini free tier, `gemini-3.1-flash-lite` by default.** The demo costs nothing and the key
   belongs to a Google Cloud project without billing, so requests above the quota are rejected,
   not charged. On the free tier, `gemini-3.8-flash` took 20–35 s for a one-page invoice and
-  sometimes answered 503; the lite model took about 4–10 s with valid output (#31). The provider sits
-  behind the `LlmClient` interface, so another one needs only a new adapter.
+  sometimes answered 503; the lite model answers with valid output in about 2–10 s
+  (#31, #51). The provider sits behind the `LlmClient` interface, so another one needs only a
+  new adapter.
 - **Text extraction in the browser.** The PDF never reaches a server, uploads stay small, and
   scanned files are rejected before any API call. pdf.js loads only when the first file
   arrives, and its Adobe CMaps are served with the app, so CID-keyed fonts (common in CJK
@@ -173,7 +174,9 @@ Checks: `npm run typecheck`, `npm run lint`, `npm test`, `npm run format:check`.
 
 [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml) runs the checks
 and the build on every pull request, and deploys `dist` to GitHub Pages on every push to
-`main`. The build uses `VITE_BASE_PATH=/PDF-Insight/`.
+`main`. The build uses `VITE_BASE_PATH=/PDF-Insight/`, so the assets, the pdf.js worker and
+its CMaps load under `/PDF-Insight/`. The app has a single view and no client-side router, so
+GitHub Pages needs neither a `HashRouter` nor a `404.html` fallback.
 
 One-time setup in the repository settings:
 
