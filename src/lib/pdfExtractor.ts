@@ -1,4 +1,4 @@
-import type * as PdfJs from 'pdfjs-dist';
+import type * as PdfJs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { TextItem, TextMarkedContent } from 'pdfjs-dist/types/src/display/api';
 import { UserFacingError } from './userFacingError.ts';
 
@@ -46,11 +46,15 @@ let pdfJsPromise: Promise<typeof PdfJs> | undefined;
  * Loads PDF.js on first use, so it is not part of the initial bundle. The `?url` import
  * makes Vite emit the worker as a hashed asset under `base`, so it also loads when the
  * app is served from a sub-path such as /PDF-Insight/ on GitHub Pages.
+ *
+ * The legacy build has the same API but polyfills the newest JavaScript methods the modern
+ * build calls directly (e.g. Map.prototype.getOrInsertComputed, Math.sumPrecise), which
+ * WebKit on iOS and older browsers lack.
  */
 function loadPdfJs(): Promise<typeof PdfJs> {
   pdfJsPromise ??= Promise.all([
-    import('pdfjs-dist'),
-    import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
+    import('pdfjs-dist/legacy/build/pdf.mjs'),
+    import('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url'),
   ]).then(
     ([pdfjs, worker]) => {
       pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
