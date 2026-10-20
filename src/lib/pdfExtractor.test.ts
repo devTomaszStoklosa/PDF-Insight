@@ -2,13 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const getDocument = vi.fn();
 
-vi.mock('pdfjs-dist', () => ({
+vi.mock('pdfjs-dist/legacy/build/pdf.mjs', () => ({
   getDocument,
   GlobalWorkerOptions: {},
   PasswordException: class extends Error {},
   InvalidPDFException: class extends Error {},
 }));
-vi.mock('pdfjs-dist/build/pdf.worker.min.mjs?url', () => ({ default: '/pdf.worker.js' }));
+vi.mock('pdfjs-dist/legacy/build/pdf.worker.min.mjs?url', () => ({ default: '/pdf.worker.js' }));
 
 /** A one-page document whose text layer holds the given text. */
 function fakeLoadingTask(text: string) {

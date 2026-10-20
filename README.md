@@ -53,7 +53,9 @@ flowchart LR
 - **Text extraction in the browser.** The PDF never reaches a server, uploads stay small, and
   scanned files are rejected before any API call. pdf.js loads only when the first file
   arrives, and its Adobe CMaps are served with the app, so CID-keyed fonts (common in CJK
-  documents) also yield text.
+  documents) also yield text. The app loads the legacy build of pdf.js: the modern build
+  calls the newest JavaScript methods without polyfills and fails on iOS, where every browser
+  uses WebKit (#56).
 - **One data contract.** `src/types/schema.ts` defines the result once with Zod. The server
   derives the JSON schema for the model from it, and both the server and the browser validate
   with it. It follows the layout and key order of the schema in the brief, uses strict objects
