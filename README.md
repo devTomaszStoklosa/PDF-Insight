@@ -9,6 +9,11 @@ Demo: https://devtomaszstoklosa.github.io/PDF-Insight/
 ![The result of an invoice analysis: document type, page count, language and date badges,
 the summary, the key points and the recent-analyses panel](docs/screenshot.jpg)
 
+## Documentation
+
+The developer reference is in [`docs/`](docs/README.md): architecture, API, server, frontend,
+configuration, development and operations.
+
 ## Architecture
 
 ```mermaid
